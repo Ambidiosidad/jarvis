@@ -1,0 +1,72 @@
+version: "3.8"
+
+# ═══════════════════════════════════════════════════════
+#  J.A.R.V.I.S. — Docker Compose DESARROLLO LOCAL
+#  Para testear en tu PC sin Raspberry Pi ni N.O.M.A.D.
+#
+#  Uso:
+#    cd extensions/
+#    docker compose -f docker-compose.dev.yml up -d --build
+#    docker exec nomad_ollama ollama pull gemma3:1b
+#    curl -X POST "http://localhost:8403/chat?message=Hola Jarvis"
+# ═══════════════════════════════════════════════════════
+
+services:
+  ollama-dev:
+    image: ollama/ollama:latest
+    container_name: nomad_ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+
+  jarvis-memory:
+    build: ./memory
+    container_name: jarvis-memory
+    ports:
+      - "8401:8401"
+    volumes:
+      - memory_data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8401/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  jarvis-voice:
+    build: ./voice
+    container_name: jarvis-voice
+    ports:
+      - "8402:8402"
+    volumes:
+      - voice_data:/app/models
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8402/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  jarvis-brain:
+    build: ./brain
+    container_name: jarvis-brain
+    ports:
+      - "8403:8403"
+    environment:
+      - OLLAMA_URL=http://nomad_ollama:11434
+      - MEMORY_URL=http://jarvis-memory:8401
+      - VOICE_URL=http://jarvis-voice:8402
+      - MOTORS_URL=http://jarvis-motors:8404
+      - MODEL_NAME=gemma3:1b
+      - JARVIS_LANGUAGE=es
+    depends_on:
+      jarvis-memory:
+        condition: service_healthy
+      jarvis-voice:
+        condition: service_healthy
+
+volumes:
+  ollama_data:
+  memory_data:
+  voice_data:

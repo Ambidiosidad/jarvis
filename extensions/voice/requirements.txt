@@ -1,0 +1,6 @@
+fastapi==0.115.0
+uvicorn==0.30.6
+python-multipart==0.0.9
+openai-whisper==20240930
+soundfile==0.12.1
+numpy==1.26.4

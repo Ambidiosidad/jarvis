@@ -41,3 +41,13 @@ admin/public/assets
 
 # Admin specific development files
 admin/storage
+
+# ─── Jarvis extras ───
+*.db
+*.sqlite
+*.wav
+*.mp3
+__pycache__/
+*.pyc
+.venv/
+/data/

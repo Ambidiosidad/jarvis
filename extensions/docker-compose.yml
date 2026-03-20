@@ -1,0 +1,82 @@
+version: "3.8"
+
+# ═══════════════════════════════════════════════════════
+#  J.A.R.V.I.S. — Extensiones (Producción en Pi 5)
+#  Se ejecuta JUNTO a N.O.M.A.D., compartiendo su red Docker.
+# ═══════════════════════════════════════════════════════
+
+networks:
+  nomad_net:
+    external: true
+    name: project-nomad_default  # Red creada por N.O.M.A.D.
+
+services:
+  jarvis-memory:
+    build: ./memory
+    container_name: jarvis-memory
+    restart: unless-stopped
+    ports:
+      - "8401:8401"
+    volumes:
+      - /data/jarvis/memory:/app/data
+    networks:
+      - nomad_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8401/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  jarvis-voice:
+    build: ./voice
+    container_name: jarvis-voice
+    restart: unless-stopped
+    ports:
+      - "8402:8402"
+    volumes:
+      - /data/jarvis/voice/models:/app/models
+      - /data/jarvis/voice/audio:/app/audio
+    devices:
+      - /dev/snd:/dev/snd
+    networks:
+      - nomad_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8402/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  jarvis-brain:
+    build: ./brain
+    container_name: jarvis-brain
+    restart: unless-stopped
+    ports:
+      - "8403:8403"
+    environment:
+      - OLLAMA_URL=http://nomad_ollama:11434
+      - QDRANT_URL=http://nomad_qdrant:6333
+      - MEMORY_URL=http://jarvis-memory:8401
+      - VOICE_URL=http://jarvis-voice:8402
+      - MOTORS_URL=http://jarvis-motors:8404
+      - MODEL_NAME=gemma3:1b
+      - JARVIS_LANGUAGE=es
+    depends_on:
+      jarvis-memory:
+        condition: service_healthy
+      jarvis-voice:
+        condition: service_healthy
+    networks:
+      - nomad_net
+
+  # ─── MOTORES (Fase 2 — descomentar cuando tengas hardware) ───
+  # jarvis-motors:
+  #   build: ./motors
+  #   container_name: jarvis-motors
+  #   restart: unless-stopped
+  #   ports:
+  #     - "8404:8404"
+  #   devices:
+  #     - /dev/gpiomem:/dev/gpiomem
+  #   privileged: true
+  #   networks:
+  #     - nomad_net
