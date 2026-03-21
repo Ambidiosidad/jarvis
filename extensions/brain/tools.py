@@ -1,32 +1,41 @@
-"""J.A.R.V.I.S. - Herramientas invocables por el LLM."""
+"""
+J.A.R.V.I.S. Tools v2
+========================
+Herramientas invocables por el LLM.
+Incluye movimiento, memoria, emociones y aprendizaje.
+"""
 
 TOOLS = {
-    "remember": {
-        "desc": "Guardar un hecho sobre el usuario en memoria permanente",
-        "params": "fact: texto del hecho",
-    },
     "move": {
         "desc": "Mover el robot",
-        "params": "direction: forward|backward|left|right|stop, duration: float, speed: 0-1",
+        "params": "direction: forward|backward|left|right|stop, duration: float, speed: 0-1"
+    },
+    "remember": {
+        "desc": "Guardar un hecho sobre el usuario en memoria permanente",
+        "params": "fact: texto del hecho"
+    },
+    "update_emotion": {
+        "desc": "Actualizar tu estado emocional actual",
+        "params": "mood: str, energy: 0-1, patience: 0-1, bond: 0-1, reason: str"
+    },
+    "learn_pattern": {
+        "desc": "Registrar un patrón observado sobre el usuario",
+        "params": "type: preference|habit|interest|communication_style, description: str"
     },
     "search_knowledge": {
-        "desc": "Buscar en documentos subidos (RAG via Qdrant)",
-        "params": "query: texto de busqueda",
+        "desc": "Buscar en documentos subidos (RAG vía Qdrant)",
+        "params": "query: texto de búsqueda"
+    },
+    "summarize_conversation": {
+        "desc": "Generar un resumen de la conversación actual para memoria a largo plazo",
+        "params": "summary: texto del resumen, topics: lista de temas"
     },
 }
 
 
 def tools_prompt() -> str:
-    lines = [
-        "\n## Herramientas disponibles",
-        'Formato de tool-use: {"tool": "nombre", "params": {...}}',
-        "",
-        "Reglas obligatorias:",
-        "- Usa remember cuando el usuario comparta datos personales (nombre, ciudad, gustos, etc.).",
-        "- Usa move solo cuando el usuario ordene movimiento fisico del robot.",
-        "- Si no corresponde una herramienta, responde solo texto y no incluyas JSON.",
-        "",
-    ]
-    for name, tool in TOOLS.items():
-        lines.append(f"- **{name}**: {tool['desc']} -> {{{tool['params']}}}")
+    lines = ["\n## Herramientas disponibles",
+             'Incluye un JSON para invocar: {"tool": "nombre", "params": {...}}\n']
+    for name, t in TOOLS.items():
+        lines.append(f"- **{name}**: {t['desc']}  →  {{{t['params']}}}")
     return "\n".join(lines)

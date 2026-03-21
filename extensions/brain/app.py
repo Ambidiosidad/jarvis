@@ -1,23 +1,25 @@
 """
-J.A.R.V.I.S. Brain - Orquestador central.
-Recibe mensajes, consulta memoria, llama al LLM y ejecuta herramientas.
+J.A.R.V.I.S. Brain v2
+========================
+Orquestador con:
+- Chain-of-thought prompting
+- Estado emocional persistente
+- Aprendizaje de patrones
+- Auto-resumen de conversaciones
 """
-
-import json
-import os
-import re
-import unicodedata
+import os, json, re, unicodedata
 from typing import Optional
-
 import httpx
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-
 from personality import build_system_prompt
 from tools import tools_prompt
 
-app = FastAPI(title="Jarvis Brain")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app = FastAPI(title="Jarvis Brain v2")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
+)
 
 OLLAMA = os.getenv("OLLAMA_URL", "http://nomad_ollama:11434")
 MEMORY = os.getenv("MEMORY_URL", "http://jarvis-memory:8401")
@@ -25,24 +27,18 @@ VOICE = os.getenv("VOICE_URL", "http://jarvis-voice:8402")
 MOTORS = os.getenv("MOTORS_URL", "http://jarvis-motors:8404")
 MODEL = os.getenv("MODEL_NAME", "gemma3:1b")
 TOOLS_TEXT = tools_prompt()
-ASCII_ONLY = os.getenv("JARVIS_ASCII_ONLY", "false").strip().lower() in {"1", "true", "yes", "on"}
+ASCII_ONLY = os.getenv("JARVIS_ASCII_ONLY", "false").strip().lower() in {
+    "1", "true", "yes", "on"
+}
 
-MOVE_DIRECTIONS = {"forward", "backward", "left", "right", "stop"}
-MOVE_INTENT_RE = re.compile(
-    r"\b(avanza|avanzar|mueve|mover|gira|retrocede|detente|para|parar|stop|forward|backward|left|right)\b",
-    re.IGNORECASE,
-)
-ASCII_TRANSLATION_TABLE = str.maketrans(
-    {
-        "\u00BF": "?",
-        "\u00A1": "!",
-        "\u201C": '"',
-        "\u201D": '"',
-        "\u2018": "'",
-        "\u2019": "'",
-    }
-)
+# Counter for auto-summarization (every N messages)
+_message_count = 0
+_SUMMARIZE_EVERY = 10  # Summarize every 10 user messages
 
+
+# ═══════════════════════════════════════
+#  Internal helpers
+# ═══════════════════════════════════════
 
 async def _get_memory() -> str:
     try:
@@ -53,183 +49,285 @@ async def _get_memory() -> str:
         return ""
 
 
-async def _save_msg(role: str, content: str):
+async def _get_emotion_text() -> str:
+    """Get formatted emotional state for prompt injection."""
     try:
         async with httpx.AsyncClient(timeout=5) as c:
-            await c.post(f"{MEMORY}/messages", json={"role": role, "content": content})
+            r = await c.get(f"{MEMORY}/emotions/current")
+            if r.status_code == 200:
+                e = r.json()
+                return (
+                    f"## Tu estado emocional actual:\n"
+                    f"Humor: {e['mood']} | Energía: {e['energy']:.1f} | "
+                    f"Paciencia: {e['patience']:.1f} | "
+                    f"Vínculo: {e['bond']:.1f}\n"
+                    f"({e['reason']})\n"
+                    f"Adapta tu tono a este estado."
+                )
+    except Exception:
+        pass
+    return ""
+
+
+async def _save_msg(role: str, content: str):
+    try:
+        content_to_store = _to_ascii(content) if ASCII_ONLY else content
+        async with httpx.AsyncClient(timeout=5) as c:
+            await c.post(f"{MEMORY}/messages",
+                         json={"role": role, "content": content_to_store})
     except Exception:
         pass
 
 
 async def _save_fact(fact: str):
-    if not fact:
-        return
-
-    fact_to_store = _to_ascii(fact) if ASCII_ONLY else fact
     try:
+        fact_to_store = _to_ascii(fact) if ASCII_ONLY else fact
         async with httpx.AsyncClient(timeout=5) as c:
-            await c.post(f"{MEMORY}/facts", params={"fact": fact_to_store})
+            await c.post(f"{MEMORY}/facts",
+                         params={"fact": fact_to_store})
     except Exception:
         pass
 
 
-async def _call_llm(user_msg: str) -> str:
-    memory = await _get_memory()
-    system = build_system_prompt(TOOLS_TEXT, memory)
+async def _update_emotion(mood: str, energy: float, patience: float,
+                          bond: float, reason: str):
+    try:
+        async with httpx.AsyncClient(timeout=5) as c:
+            await c.post(f"{MEMORY}/emotions", json={
+                "mood": mood,
+                "energy": min(1.0, max(0.0, energy)),
+                "patience": min(1.0, max(0.0, patience)),
+                "bond": min(1.0, max(0.0, bond)),
+                "reason": reason
+            })
+    except Exception:
+        pass
+
+
+async def _learn_pattern(pattern_type: str, description: str):
+    try:
+        async with httpx.AsyncClient(timeout=5) as c:
+            await c.post(f"{MEMORY}/patterns",
+                         params={"pattern_type": pattern_type,
+                                 "description": description})
+    except Exception:
+        pass
+
+
+async def _save_summary(summary: str, topics: list):
+    try:
+        async with httpx.AsyncClient(timeout=5) as c:
+            await c.post(f"{MEMORY}/summaries",
+                         json={"summary": summary, "topics": topics})
+    except Exception:
+        pass
+
+
+async def _call_llm(prompt: str, system: str,
+                    max_tokens: int = 512) -> str:
     async with httpx.AsyncClient(timeout=120) as c:
-        r = await c.post(
-            f"{OLLAMA}/api/generate",
-            json={
-                "model": MODEL,
-                "prompt": user_msg,
-                "system": system,
-                "stream": False,
-                "options": {"temperature": 0.7, "num_ctx": 4096, "num_predict": 512},
-            },
-        )
+        r = await c.post(f"{OLLAMA}/api/generate", json={
+            "model": MODEL,
+            "prompt": prompt,
+            "system": system,
+            "stream": False,
+            "options": {
+                "temperature": 0.7,
+                "num_ctx": 4096,
+                "num_predict": max_tokens,
+            }
+        })
         r.raise_for_status()
     return r.json().get("response", "").strip()
 
 
-def _extract_tool(text: str) -> Optional[dict]:
-    try:
-        start = text.index("{")
-        end = text.rindex("}") + 1
-        parsed = json.loads(text[start:end])
-        return parsed if "tool" in parsed else None
-    except (ValueError, json.JSONDecodeError):
-        return None
+def _extract_all_tools(text: str) -> list[dict]:
+    """Extract ALL JSON tool calls from the response."""
+    tools = []
+    # Find all JSON-like blocks
+    for match in re.finditer(r'\{[^{}]*"tool"[^{}]*\}', text):
+        try:
+            parsed = json.loads(match.group())
+            if "tool" in parsed:
+                tools.append(parsed)
+        except json.JSONDecodeError:
+            continue
+    return tools
 
 
 def _clean(text: str) -> str:
-    try:
-        start = text.index("{")
-        end = text.rindex("}") + 1
-        parsed = json.loads(text[start:end])
-        if "tool" in parsed:
-            cleaned = (text[:start] + text[end:]).strip()
-            cleaned = re.sub(r"```(?:json)?\s*```", "", cleaned, flags=re.IGNORECASE | re.DOTALL).strip()
-            return cleaned or "Entendido."
-    except (ValueError, json.JSONDecodeError):
-        pass
-    return text
+    """Remove all JSON tool blocks from visible text."""
+    cleaned = re.sub(r'\{[^{}]*"tool"[^{}]*\}', '', text)
+    # Clean up extra whitespace and newlines
+    cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
+    return cleaned.strip()
 
 
 def _to_ascii(text: str) -> str:
-    normalized = (text or "").translate(ASCII_TRANSLATION_TABLE)
-    normalized = unicodedata.normalize("NFKD", normalized)
+    normalized = unicodedata.normalize("NFKD", text or "")
     return normalized.encode("ascii", "ignore").decode("ascii")
 
 
-def _output_text(text: str) -> str:
+def _out(text: str) -> str:
     return _to_ascii(text) if ASCII_ONLY else text
 
 
-def _is_move_intent(user_msg: str) -> bool:
-    return bool(MOVE_INTENT_RE.search(user_msg or ""))
+async def _exec_tools(tool_calls: list[dict]):
+    """Execute all tool calls from the response."""
+    for tc in tool_calls:
+        tool = tc.get("tool")
+        params = tc.get("params", {})
+
+        if tool == "remember":
+            await _save_fact(params.get("fact", ""))
+
+        elif tool == "update_emotion":
+            await _update_emotion(
+                mood=params.get("mood", "neutral"),
+                energy=params.get("energy", 0.5),
+                patience=params.get("patience", 0.8),
+                bond=params.get("bond", 0.1),
+                reason=params.get("reason", "")
+            )
+
+        elif tool == "learn_pattern":
+            await _learn_pattern(
+                pattern_type=params.get("type", "preference"),
+                description=params.get("description", "")
+            )
+
+        elif tool == "summarize_conversation":
+            await _save_summary(
+                summary=params.get("summary", ""),
+                topics=params.get("topics", [])
+            )
+
+        elif tool == "move":
+            try:
+                async with httpx.AsyncClient(timeout=10) as c:
+                    d = params.get("direction", "stop")
+                    await c.post(f"{MOTORS}/move/{d}", params={
+                        "duration": params.get("duration", 1.0),
+                        "speed": params.get("speed", 0.7)
+                    })
+            except Exception:
+                pass
 
 
-def _normalize_fact_fragment(fragment: str) -> str:
-    value = re.sub(r"\s+", " ", fragment).strip(" .,!?:;\"'")
-    value = re.split(r"\b(?:y|and|pero|que)\b", value, maxsplit=1, flags=re.IGNORECASE)[0]
-    return value.strip(" .,!?:;\"'")
+async def _auto_summarize():
+    """Ask the LLM to summarize recent conversation for long-term memory."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as c:
+            r = await c.get(f"{MEMORY}/messages/recent",
+                            params={"limit": 20})
+            if r.status_code != 200:
+                return
+            messages = r.json().get("messages", [])
+
+        if len(messages) < 6:
+            return
+
+        conversation = "\n".join(
+            f"{m['role']}: {m['content']}" for m in messages
+        )
+
+        summary_prompt = (
+            f"Resume esta conversación en 2-3 frases. "
+            f"Incluye: qué se discutió, qué aprendiste del usuario, "
+            f"y qué fue importante.\n\n{conversation}"
+        )
+
+        summary_system = (
+            "Eres un asistente que genera resúmenes concisos. "
+            "Responde SOLO con el resumen, sin explicaciones. "
+            "Incluye al final una línea con los temas principales "
+            "separados por comas, precedidos por 'TEMAS:'"
+        )
+
+        result = await _call_llm(summary_prompt, summary_system,
+                                 max_tokens=200)
+
+        # Parse summary and topics
+        lines = result.strip().split("\n")
+        topics_line = ""
+        summary_lines = []
+        for line in lines:
+            if line.upper().startswith("TEMAS:"):
+                topics_line = line.split(":", 1)[1].strip()
+            else:
+                summary_lines.append(line)
+
+        summary_text = " ".join(summary_lines).strip()
+        topics = [t.strip() for t in topics_line.split(",") if t.strip()] \
+            if topics_line else ["conversación general"]
+
+        if summary_text:
+            await _save_summary(summary_text, topics)
+
+    except Exception as e:
+        print(f"[BRAIN] Auto-summarize error: {e}")
 
 
-def _extract_facts_from_user_message(user_msg: str) -> list[str]:
-    text = re.sub(r"\s+", " ", user_msg).strip()
-    if not text:
-        return []
-
-    patterns = [
-        (r"\bme llamo\s+([^\.,;!?]+)", "El usuario se llama {}"),
-        (r"\bmi nombre es\s+([^\.,;!?]+)", "El usuario se llama {}"),
-        (r"\bvivo en\s+([^\.,;!?]+)", "El usuario vive en {}"),
-    ]
-
-    facts: list[str] = []
-    for pattern, template in patterns:
-        match = re.search(pattern, text, flags=re.IGNORECASE)
-        if not match:
-            continue
-        value = _normalize_fact_fragment(match.group(1))
-        if value:
-            facts.append(template.format(value))
-
-    unique_facts: list[str] = []
-    seen = set()
-    for fact in facts:
-        key = fact.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        unique_facts.append(fact)
-    return unique_facts
-
-
-async def _exec_tool(tc: dict, user_msg: str) -> bool:
-    tool = tc.get("tool")
-    params = tc.get("params", {}) or {}
-
-    if tool == "remember":
-        fact = str(params.get("fact", "")).strip()
-        if not fact:
-            return False
-        await _save_fact(fact)
-        return True
-
-    if tool == "move":
-        direction = str(params.get("direction", "")).strip().lower()
-        if direction not in MOVE_DIRECTIONS or not _is_move_intent(user_msg):
-            return False
-
-        try:
-            duration = float(params.get("duration", 1.0))
-            speed = float(params.get("speed", 0.7))
-            async with httpx.AsyncClient(timeout=10) as c:
-                await c.post(
-                    f"{MOTORS}/move/{direction}",
-                    params={"duration": duration, "speed": speed},
-                )
-            return True
-        except Exception:
-            return False
-
-    return False
-
+# ═══════════════════════════════════════
+#  Main thinking pipeline
+# ═══════════════════════════════════════
 
 async def _think(user_msg: str) -> dict:
+    """Full cognitive pipeline: memory → emotion → LLM → tools → response."""
+    global _message_count
+
+    # 1. Save user message
     await _save_msg("user", user_msg)
-    raw = await _call_llm(user_msg)
+    _message_count += 1
+
+    # 2. Get memory context + emotional state
+    memory = await _get_memory()
+    emotion_text = await _get_emotion_text()
+
+    # 3. Build system prompt with everything
+    system = build_system_prompt(TOOLS_TEXT, memory, emotion_text)
+
+    # 4. Call LLM
+    raw = await _call_llm(user_msg, system)
+
+    # 5. Save assistant response
     await _save_msg("assistant", raw)
 
-    tool_call = _extract_tool(raw)
-    tool_executed = None
-    if tool_call:
-        executed = await _exec_tool(tool_call, user_msg)
-        if executed:
-            tool_executed = tool_call
+    # 6. Extract and execute ALL tool calls
+    tool_calls = _extract_all_tools(raw)
+    if tool_calls:
+        await _exec_tools(tool_calls)
 
-    remember_fact = ""
-    if tool_call and str(tool_call.get("tool", "")).lower() == "remember":
-        remember_fact = str((tool_call.get("params") or {}).get("fact", "")).strip()
+    # 7. Auto-summarize every N messages
+    if _message_count >= _SUMMARIZE_EVERY:
+        _message_count = 0
+        # Run in background (don't block response)
+        import asyncio
+        asyncio.create_task(_auto_summarize())
 
-    if not remember_fact:
-        for fact in _extract_facts_from_user_message(user_msg):
-            await _save_fact(fact)
+    return {"text": _out(_clean(raw)), "tools": tool_calls}
 
-    return {"text": _output_text(_clean(raw)), "tool": tool_executed}
 
+# ═══════════════════════════════════════
+#  Endpoints
+# ═══════════════════════════════════════
 
 @app.post("/chat")
 async def chat(message: str):
+    """Chat por texto — endpoint principal."""
     result = await _think(message)
-    return {"response": result["text"], "tool_executed": result["tool"]}
+    return {
+        "response": _out(result["text"]),
+        "tools_executed": result["tools"]
+    }
 
 
 @app.post("/voice-chat")
 async def voice_chat(audio: UploadFile = File(...)):
+    """Chat por voz: audio → STT → LLM → respuesta."""
     async with httpx.AsyncClient(timeout=60) as c:
-        files = {"audio": (audio.filename, await audio.read(), audio.content_type)}
+        files = {"audio": (audio.filename, await audio.read(),
+                           audio.content_type)}
         r = await c.post(f"{VOICE}/stt", files=files)
         user_text = r.json().get("text", "")
 
@@ -237,20 +335,37 @@ async def voice_chat(audio: UploadFile = File(...)):
         return {"transcription": "", "response": "No te he entendido."}
 
     result = await _think(user_text)
-    transcription = _output_text(user_text)
+
+    response_text = _out(result["text"])
     return {
-        "transcription": transcription,
-        "response": result["text"],
-        "tool_executed": result["tool"],
-        "audio_url": f"{VOICE}/tts?text={result['text'][:300]}",
+        "transcription": _out(user_text),
+        "response": response_text,
+        "tools_executed": result["tools"],
+        "audio_url": f"{VOICE}/tts?text={response_text[:300]}"
+    }
+
+
+@app.get("/status")
+async def status():
+    """Full status with emotional state."""
+    try:
+        async with httpx.AsyncClient(timeout=5) as c:
+            emotion = (await c.get(f"{MEMORY}/emotions/current")).json()
+            stats = (await c.get(f"{MEMORY}/stats")).json()
+    except Exception:
+        emotion = {"mood": "unknown"}
+        stats = {}
+    return {
+        "service": "jarvis-brain",
+        "version": "2.0",
+        "model": MODEL,
+        "emotion": emotion,
+        "memory": stats,
+        "messages_until_summary": _SUMMARIZE_EVERY - _message_count
     }
 
 
 @app.get("/health")
 async def health():
-    return {
-        "status": "ok",
-        "model": MODEL,
-        "service": "jarvis-brain",
-        "ascii_only": ASCII_ONLY,
-    }
+    return {"status": "ok", "model": MODEL, "service": "jarvis-brain",
+            "version": "2.0", "ascii_only": ASCII_ONLY}
