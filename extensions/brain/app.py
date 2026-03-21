@@ -1,12 +1,11 @@
 """
-J.A.R.V.I.S. Brain v2.1
-==========================
-Orquestador con:
-- Chain-of-thought prompting
-- Estado emocional AUTOMÁTICO (no depende del LLM)
-- Aprendizaje de patrones
-- Auto-resumen de conversaciones
-- Detección automática de hechos personales
+J.A.R.V.I.S. Brain v3
+========================
+Mejoras sobre v2.1:
+- Multi-turno: inyecta últimos mensajes como contexto conversacional
+- Clasificación de intención: prompt especializado por tipo de pregunta
+- Prompts optimizados para modelos pequeños (1B-3B)
+- Todo lo anterior: emociones automáticas, auto-resumen, extracción de hechos
 """
 import os, json, re, asyncio, unicodedata
 from typing import Optional
@@ -16,8 +15,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from personality import build_system_prompt
 from tools import tools_prompt
 from emotion_analyzer import analyze_conversation_sentiment
+from intent_classifier import classify_intent
 
-app = FastAPI(title="Jarvis Brain v2.1")
+app = FastAPI(title="Jarvis Brain v3")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
@@ -28,26 +28,39 @@ MEMORY = os.getenv("MEMORY_URL", "http://jarvis-memory:8401")
 VOICE = os.getenv("VOICE_URL", "http://jarvis-voice:8402")
 MOTORS = os.getenv("MOTORS_URL", "http://jarvis-motors:8404")
 MODEL = os.getenv("MODEL_NAME", "gemma3:1b")
-TOOLS_TEXT = tools_prompt()
 ASCII_ONLY = os.getenv("JARVIS_ASCII_ONLY", "false").strip().lower() in {
     "1", "true", "yes", "on"
 }
+
+# How many previous messages to include as conversation context
+CONTEXT_WINDOW = int(os.getenv("JARVIS_CONTEXT_MESSAGES", "6"))
 
 _message_count = 0
 _SUMMARIZE_EVERY = 10
 
 
 # ═══════════════════════════════════════
-#  Internal helpers
+#  Memory & emotion helpers
 # ═══════════════════════════════════════
 
-async def _get_memory() -> str:
+async def _get_memory_context() -> str:
     try:
         async with httpx.AsyncClient(timeout=5) as c:
             r = await c.get(f"{MEMORY}/context")
             return r.json().get("context", "") if r.status_code == 200 else ""
     except Exception:
         return ""
+
+
+async def _get_recent_messages() -> list[dict]:
+    """Get recent conversation messages for multi-turn context."""
+    try:
+        async with httpx.AsyncClient(timeout=5) as c:
+            r = await c.get(f"{MEMORY}/messages/recent",
+                            params={"limit": CONTEXT_WINDOW})
+            return r.json().get("messages", []) if r.status_code == 200 else []
+    except Exception:
+        return []
 
 
 async def _get_current_emotion() -> dict:
@@ -81,8 +94,9 @@ async def _save_fact(fact: str):
 
 async def _update_emotion(state: dict):
     try:
+        state_to_store = _sanitize_emotion(state) if ASCII_ONLY else state
         async with httpx.AsyncClient(timeout=5) as c:
-            await c.post(f"{MEMORY}/emotions", json=state)
+            await c.post(f"{MEMORY}/emotions", json=state_to_store)
     except Exception:
         pass
 
@@ -108,19 +122,73 @@ async def _save_summary(summary: str, topics: list):
         pass
 
 
-async def _call_llm(prompt: str, system: str,
-                    max_tokens: int = 512) -> str:
+# ═══════════════════════════════════════
+#  LLM call with multi-turn context
+# ═══════════════════════════════════════
+
+def _to_ascii(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", text or "")
+    return normalized.encode("ascii", "ignore").decode("ascii")
+
+
+def _out(text: str) -> str:
+    return _to_ascii(text) if ASCII_ONLY else text
+
+
+def _sanitize_emotion(emotion: dict) -> dict:
+    if not ASCII_ONLY:
+        return emotion
+    safe = {}
+    for key, value in (emotion or {}).items():
+        safe[key] = _to_ascii(value) if isinstance(value, str) else value
+    return safe
+
+
+async def _call_llm_chat(user_msg: str, system: str,
+                         history: list[dict],
+                         max_tokens: int = 512) -> str:
+    """
+    Call Ollama with chat API (multi-turn) instead of generate API.
+    This gives the LLM context of the recent conversation.
+    """
+    messages = [{"role": "system", "content": system}]
+
+    # Add conversation history
+    for msg in history:
+        messages.append({
+            "role": msg["role"],
+            "content": msg["content"][:500]  # Truncate to save context space
+        })
+
+    # Add current user message
+    messages.append({"role": "user", "content": user_msg})
+
     async with httpx.AsyncClient(timeout=120) as c:
-        r = await c.post(f"{OLLAMA}/api/generate", json={
+        r = await c.post(f"{OLLAMA}/api/chat", json={
             "model": MODEL,
-            "prompt": prompt,
-            "system": system,
+            "messages": messages,
             "stream": False,
             "options": {
                 "temperature": 0.7,
                 "num_ctx": 4096,
                 "num_predict": max_tokens,
             }
+        })
+        r.raise_for_status()
+    return r.json().get("message", {}).get("content", "").strip()
+
+
+async def _call_llm_simple(prompt: str, system: str,
+                           max_tokens: int = 150) -> str:
+    """Simple generate call for internal tasks (summarization)."""
+    async with httpx.AsyncClient(timeout=120) as c:
+        r = await c.post(f"{OLLAMA}/api/generate", json={
+            "model": MODEL,
+            "prompt": prompt,
+            "system": system,
+            "stream": False,
+            "options": {"temperature": 0.3, "num_ctx": 2048,
+                        "num_predict": max_tokens}
         })
         r.raise_for_status()
     return r.json().get("response", "").strip()
@@ -145,26 +213,9 @@ def _extract_all_tools(text: str) -> list[dict]:
 def _clean(text: str) -> str:
     cleaned = re.sub(r'\{[^{}]*"tool"[^{}]*\}', '', text)
     cleaned = re.sub(r'```json\s*```', '', cleaned)
+    cleaned = re.sub(r'```\s*```', '', cleaned)
     cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
     return cleaned.strip()
-
-
-def _to_ascii(text: str) -> str:
-    normalized = unicodedata.normalize("NFKD", text or "")
-    return normalized.encode("ascii", "ignore").decode("ascii")
-
-
-def _out(text: str) -> str:
-    return _to_ascii(text) if ASCII_ONLY else text
-
-
-def _sanitize_emotion(emotion: dict) -> dict:
-    if not ASCII_ONLY:
-        return emotion
-    safe = {}
-    for key, value in (emotion or {}).items():
-        safe[key] = _to_ascii(value) if isinstance(value, str) else value
-    return safe
 
 
 async def _exec_tools(tool_calls: list[dict]):
@@ -197,22 +248,24 @@ async def _exec_tools(tool_calls: list[dict]):
 # ═══════════════════════════════════════
 
 _FACT_PATTERNS = [
-    (r"(?:me llamo|mi nombre es|soy)\s+(\w+)", "El usuario se llama {}"),
-    (r"(?:vivo en|soy de)\s+(.+?)(?:\.|,|$)", "El usuario vive en {}"),
-    (r"(?:trabajo en|trabajo como|soy)\s+(.+?)(?:\.|,|$)", "El usuario trabaja como/en {}"),
+    (r"(?:me llamo|mi nombre es)\s+([A-Z]\w+)", "El usuario se llama {}"),
+    (r"(?:vivo en|soy de)\s+([A-Z]\w+(?:\s+\w+)?)", "El usuario vive en {}"),
+    (r"(?:trabajo en|trabajo como)\s+(.+?)(?:\.|,|$)", "El usuario trabaja en/como {}"),
     (r"(?:tengo)\s+(\d+)\s+años", "El usuario tiene {} años"),
-    (r"(?:me gusta|me encanta|me apasiona)\s+(.+?)(?:\.|,|$)", "Al usuario le gusta {}"),
+    (r"(?:me gusta|me encanta|me apasiona)\s+(.+?)(?:\.|,|y\s|$)", "Al usuario le gusta {}"),
+    (r"(?:my name is)\s+(\w+)", "El usuario se llama {}"),
+    (r"(?:i live in)\s+(\w+(?:\s+\w+)?)", "El usuario vive en {}"),
 ]
 
 
 async def _auto_extract_facts(user_msg: str):
-    """Extract personal facts from user message automatically."""
-    lower = user_msg.lower()
     for pattern, template in _FACT_PATTERNS:
-        match = re.search(pattern, lower)
+        match = re.search(pattern, user_msg, re.IGNORECASE)
         if match:
-            fact = template.format(match.group(1).strip())
-            await _save_fact(fact)
+            value = match.group(1).strip()
+            if len(value) > 2:  # Avoid single-char matches
+                fact = template.format(value)
+                await _save_fact(fact)
 
 
 # ═══════════════════════════════════════
@@ -232,23 +285,20 @@ async def _auto_summarize():
             return
 
         conversation = "\n".join(
-            f"{m['role']}: {m['content'][:200]}" for m in messages
+            f"{m['role']}: {m['content'][:150]}" for m in messages
         )
 
-        result = await _call_llm(
-            f"Resume esta conversación en 2-3 frases breves. "
-            f"Incluye qué se discutió y qué es importante. "
-            f"Al final pon TEMAS: seguido de los temas principales "
-            f"separados por comas.\n\n{conversation}",
-            "Genera resúmenes concisos. Solo el resumen, sin explicaciones.",
-            max_tokens=150
+        result = await _call_llm_simple(
+            f"Resume en 2 frases qué se discutió. "
+            f"Al final escribe TEMAS: tema1, tema2\n\n{conversation}",
+            "Genera resúmenes breves. Solo el resumen."
         )
 
         lines = result.strip().split("\n")
         topics_line = ""
         summary_lines = []
         for line in lines:
-            if line.upper().startswith("TEMAS:"):
+            if "TEMAS:" in line.upper():
                 topics_line = line.split(":", 1)[1].strip()
             else:
                 summary_lines.append(line)
@@ -257,7 +307,7 @@ async def _auto_summarize():
         topics = [t.strip() for t in topics_line.split(",") if t.strip()] \
             if topics_line else ["conversación"]
 
-        if summary_text:
+        if summary_text and len(summary_text) > 10:
             await _save_summary(summary_text, topics)
 
     except Exception as e:
@@ -275,48 +325,46 @@ async def _think(user_msg: str) -> dict:
     await _save_msg("user", user_msg)
     _message_count += 1
 
-    # 2. Auto-extract facts from user message
+    # 2. Auto-extract facts
     await _auto_extract_facts(user_msg)
 
-    # 3. Get current emotional state
+    # 3. Classify intent → select specialized prompt
+    intent = classify_intent(user_msg)
+
+    # 4. Get emotional state
     current_emotion = await _get_current_emotion()
-
-    # 4. Get memory context
-    memory = await _get_memory()
-
-    # 5. Build emotional context for prompt
     emotion_text = (
-        f"## Tu estado emocional actual:\n"
-        f"Humor: {current_emotion.get('mood', 'neutral')} | "
-        f"Energía: {current_emotion.get('energy', 0.5):.1f} | "
-        f"Paciencia: {current_emotion.get('patience', 0.8):.1f} | "
-        f"Vínculo: {current_emotion.get('bond', 0.1):.2f}\n"
-        f"Adapta tu tono: si curious→haz preguntas, "
-        f"si happy→muestra entusiasmo, si empathetic→sé cálido, "
-        f"si thoughtful→sé reflexivo."
+        f"Tu humor: {current_emotion.get('mood', 'neutral')}. "
+        f"Vínculo con usuario: {current_emotion.get('bond', 0.1):.1f}/1.0."
     )
 
-    # 6. Build system prompt
-    system = build_system_prompt(TOOLS_TEXT, memory, emotion_text)
+    # 5. Get memory context (facts + summaries)
+    memory = await _get_memory_context()
 
-    # 7. Call LLM
-    raw = await _call_llm(user_msg, system)
+    # 6. Build specialized system prompt
+    system = build_system_prompt(intent, memory, emotion_text)
 
-    # 8. Save response
+    # 7. Get recent conversation history for multi-turn
+    history = await _get_recent_messages()
+
+    # 8. Call LLM with full context
+    raw = await _call_llm_chat(user_msg, system, history)
+
+    # 9. Save response
     await _save_msg("assistant", raw)
 
-    # 9. Execute any tool calls the LLM generated
+    # 10. Execute tool calls
     tool_calls = _extract_all_tools(raw)
     if tool_calls:
         await _exec_tools(tool_calls)
 
-    # 10. AUTOMATIC emotion update (doesn't depend on LLM)
+    # 11. Update emotion automatically
     new_emotion = analyze_conversation_sentiment(
         user_msg, raw, current_emotion
     )
     await _update_emotion(new_emotion)
 
-    # 11. Auto-summarize periodically
+    # 12. Auto-summarize periodically
     if _message_count >= _SUMMARIZE_EVERY:
         _message_count = 0
         asyncio.create_task(_auto_summarize())
@@ -325,6 +373,7 @@ async def _think(user_msg: str) -> dict:
         "text": _out(_clean(raw)),
         "tools": tool_calls,
         "emotion": _sanitize_emotion(new_emotion),
+        "intent": intent,
     }
 
 
@@ -339,6 +388,7 @@ async def chat(message: str):
         "response": _out(result["text"]),
         "tools_executed": result["tools"],
         "emotion": _sanitize_emotion(result["emotion"]),
+        "intent": result["intent"],
     }
 
 
@@ -354,14 +404,15 @@ async def voice_chat(audio: UploadFile = File(...)):
         return {"transcription": "", "response": "No te he entendido."}
 
     result = await _think(user_text)
-
     response_text = _out(result["text"])
+
     return {
         "transcription": _out(user_text),
         "response": response_text,
         "tools_executed": result["tools"],
         "emotion": _sanitize_emotion(result["emotion"]),
-        "audio_url": f"{VOICE}/tts?text={response_text[:300]}",
+        "intent": result["intent"],
+        "audio_url": f"{VOICE}/tts?text={response_text[:300]}"
     }
 
 
@@ -374,9 +425,11 @@ async def status():
     except Exception:
         emotion = {"mood": "unknown"}
         stats = {}
+    emotion = _sanitize_emotion(emotion)
     return {
-        "service": "jarvis-brain", "version": "2.1",
+        "service": "jarvis-brain", "version": "3.0",
         "model": MODEL, "emotion": emotion, "memory": stats,
+        "context_window": CONTEXT_WINDOW,
         "messages_until_summary": max(0, _SUMMARIZE_EVERY - _message_count)
     }
 
@@ -384,5 +437,5 @@ async def status():
 @app.get("/health")
 async def health():
     return {"status": "ok", "model": MODEL,
-            "service": "jarvis-brain", "version": "2.1",
+            "service": "jarvis-brain", "version": "3.0",
             "ascii_only": ASCII_ONLY}
