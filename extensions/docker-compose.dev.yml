@@ -60,6 +60,7 @@ services:
       - MOTORS_URL=http://jarvis-motors:8404
       - MODEL_NAME=gemma3:1b
       - JARVIS_LANGUAGE=es
+      - JARVIS_ASCII_ONLY=true
     depends_on:
       jarvis-memory:
         condition: service_healthy
