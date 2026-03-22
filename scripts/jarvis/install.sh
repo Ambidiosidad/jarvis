@@ -34,6 +34,84 @@ fail() { echo -e "  ${RED}✗${NC} $1"; }
 warn() { echo -e "  ${YELLOW}!${NC} $1"; }
 info() { echo -e "  ${DIM}$1${NC}"; }
 
+has_cmd() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+dc() {
+    if docker compose version >/dev/null 2>&1; then
+        docker compose "$@"
+        return $?
+    fi
+    if has_cmd docker-compose; then
+        docker-compose "$@"
+        return $?
+    fi
+    fail "Docker Compose no está disponible."
+    return 1
+}
+
+ensure_docker_engine() {
+    if has_cmd docker && docker info >/dev/null 2>&1; then
+        return 0
+    fi
+
+    echo "  Instalando Docker Engine..."
+    apt-get update -qq
+
+    # Intento 1: paquetes distro (Raspberry Pi OS / Debian / Ubuntu)
+    if ! apt-get install -y -qq docker.io docker-compose-plugin; then
+        # Intento 2: algunas distros usan docker-compose clásico
+        apt-get install -y -qq docker.io docker-compose || true
+    fi
+
+    # Intento 3 (fallback universal): script oficial Docker
+    if ! has_cmd docker; then
+        curl -fsSL https://get.docker.com | sh
+    fi
+
+    if ! has_cmd docker; then
+        fail "Docker no se pudo instalar."
+        exit 1
+    fi
+
+    systemctl enable docker >/dev/null 2>&1 || true
+    systemctl start docker >/dev/null 2>&1 || true
+
+    # Docker puede tardar unos segundos tras instalarse
+    if ! docker info >/dev/null 2>&1; then
+        sleep 3
+    fi
+    if ! docker info >/dev/null 2>&1; then
+        fail "Docker daemon no responde."
+        exit 1
+    fi
+}
+
+ensure_docker_compose() {
+    if docker compose version >/dev/null 2>&1; then
+        return 0
+    fi
+    if has_cmd docker-compose; then
+        return 0
+    fi
+
+    echo "  Instalando Docker Compose..."
+    apt-get update -qq
+    apt-get install -y -qq docker-compose-plugin || \
+        apt-get install -y -qq docker-compose || true
+
+    if docker compose version >/dev/null 2>&1; then
+        return 0
+    fi
+    if has_cmd docker-compose; then
+        return 0
+    fi
+
+    fail "Docker Compose no está disponible tras la instalación."
+    exit 1
+}
+
 ask_yes() {
     # ask_yes "pregunta" → devuelve 0 si sí (default sí)
     local prompt="$1"
@@ -190,15 +268,18 @@ fi
 echo ""
 echo -e "${BOLD}[2/8] Configurando Docker...${NC}"
 
-if command -v docker &> /dev/null; then
+if has_cmd docker && docker info >/dev/null 2>&1; then
     ok "Docker instalado: $(docker --version | cut -d' ' -f3)"
 else
-    echo "  Instalando Docker..."
-    apt-get update -qq
-    apt-get install -y -qq docker.io docker-compose-plugin
-    systemctl enable docker
-    systemctl start docker
-    ok "Docker instalado"
+    ensure_docker_engine
+    ok "Docker instalado: $(docker --version | cut -d' ' -f3)"
+fi
+
+ensure_docker_compose
+if docker compose version >/dev/null 2>&1; then
+    ok "Docker Compose: plugin"
+else
+    ok "Docker Compose: clásico"
 fi
 
 # Redirigir Docker al NVMe
@@ -255,13 +336,21 @@ echo -e "${BOLD}[5/8] Construyendo servicios...${NC}"
 cd $JARVIS_DIR/extensions
 
 # Parar contenedores anteriores si existen
-docker compose down 2>/dev/null || true
+dc down 2>/dev/null || true
 
 echo "  Construyendo imágenes (puede tardar unos minutos)..."
-docker compose build >> $LOG_FILE 2>&1
+if ! dc build >> "$LOG_FILE" 2>&1; then
+    fail "Error construyendo imágenes (ver $LOG_FILE)"
+    tail -n 80 "$LOG_FILE"
+    exit 1
+fi
 
 echo "  Levantando servicios..."
-docker compose up -d >> $LOG_FILE 2>&1
+if ! dc up -d >> "$LOG_FILE" 2>&1; then
+    fail "Error levantando servicios (ver $LOG_FILE)"
+    tail -n 80 "$LOG_FILE"
+    exit 1
+fi
 
 # Esperar a servicios críticos
 echo "  Esperando a que arranquen..."
@@ -437,8 +526,8 @@ Requires=docker.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/bash -c "cd $JARVIS_DIR/extensions && docker compose up -d"
-ExecStop=/bin/bash -c "cd $JARVIS_DIR/extensions && docker compose down"
+ExecStart=/bin/bash -lc 'cd $JARVIS_DIR/extensions && if docker compose version >/dev/null 2>&1; then docker compose up -d; else docker-compose up -d; fi'
+ExecStop=/bin/bash -lc 'cd $JARVIS_DIR/extensions && if docker compose version >/dev/null 2>&1; then docker compose down; else docker-compose down; fi'
 WorkingDirectory=$JARVIS_DIR
 
 [Install]
