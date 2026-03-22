@@ -1,14 +1,17 @@
 #!/bin/bash
-# ═══════════════════════════════════════════════════════
-#  Project J.A.R.V.I.S. — Instalador unificado
-#  
-#  Un solo comando para instalar todo en Raspberry Pi 5:
-#    curl -fsSL https://raw.githubusercontent.com/Ambidiosidad/jarvis/main/scripts/jarvis/install.sh | sudo bash
+# ═══════════════════════════════════════════════════════════════
+#  Project J.A.R.V.I.S. — Instalador unificado v2
 #
-#  O desde el repo clonado:
-#    sudo bash scripts/jarvis/install.sh
-# ═══════════════════════════════════════════════════════
-set -e
+#  Instala todo en Raspberry Pi 5 con un solo comando:
+#
+#    sudo apt-get update && sudo apt-get install -y curl git && \
+#    git clone https://github.com/Ambidiosidad/jarvis.git /opt/jarvis && \
+#    sudo bash /opt/jarvis/scripts/jarvis/install.sh
+#
+# ═══════════════════════════════════════════════════════════════
+
+# No usar set -e para que las descargas opcionales no corten el script
+# Controlamos errores manualmente donde importa
 
 # ─── Colores ───
 RED='\033[0;31m'
@@ -16,13 +19,75 @@ GREEN='\033[0;32m'
 CYAN='\033[0;36m'
 YELLOW='\033[1;33m'
 BOLD='\033[1m'
+DIM='\033[2m'
 NC='\033[0m'
 
 # ─── Variables ───
 JARVIS_DIR="/opt/jarvis"
 DATA_DIR="/data/jarvis"
-REPO_URL="https://github.com/Ambidiosidad/jarvis.git"
-KIWIX_DOWNLOAD="https://download.kiwix.org/zim"
+KIWIX_BASE="https://download.kiwix.org/zim"
+LOG_FILE="/tmp/jarvis_install.log"
+
+# ─── Funciones auxiliares ───
+ok()   { echo -e "  ${GREEN}✓${NC} $1"; }
+fail() { echo -e "  ${RED}✗${NC} $1"; }
+warn() { echo -e "  ${YELLOW}!${NC} $1"; }
+info() { echo -e "  ${DIM}$1${NC}"; }
+
+ask_yes() {
+    # ask_yes "pregunta" → devuelve 0 si sí (default sí)
+    local prompt="$1"
+    read -p "  $prompt [S/n]: " answer
+    [[ ! "$answer" =~ ^[nN]$ ]]
+}
+
+ask_no() {
+    # ask_no "pregunta" → devuelve 0 si sí (default no)
+    local prompt="$1"
+    read -p "  $prompt [s/N]: " answer
+    [[ "$answer" =~ ^[sS]$ ]]
+}
+
+wait_for_service() {
+    local url=$1
+    local name=$2
+    local max_wait=${3:-60}
+    for i in $(seq 1 $max_wait); do
+        if curl -s "$url" > /dev/null 2>&1; then
+            return 0
+        fi
+        sleep 2
+    done
+    return 1
+}
+
+download_zim() {
+    local name="$1"
+    local filename="$2"
+    local url="$3"
+    local size="$4"
+
+    echo -e "\n  ${CYAN}$name${NC} — ~$size"
+    
+    # Verificar si ya existe
+    if [ -f "$DATA_DIR/zim/$filename" ]; then
+        ok "$name ya descargado"
+        return 0
+    fi
+
+    if ask_yes "¿Descargar?"; then
+        echo "  Descargando $name..."
+        if wget -c -q --show-progress -O "$DATA_DIR/zim/$filename" "$url" 2>&1; then
+            ok "$name descargado"
+        else
+            # Si falla la URL exacta, informar al usuario
+            rm -f "$DATA_DIR/zim/$filename"  # Limpiar descarga parcial
+            warn "No se pudo descargar automáticamente."
+            info "Descarga manual: library.kiwix.org → buscar '$name'"
+            info "Guardar en: $DATA_DIR/zim/"
+        fi
+    fi
+}
 
 # ─── Banner ───
 clear
@@ -35,294 +100,303 @@ echo "╚█████╔╝██║  ██║██║  ██║ ╚██
 echo " ╚════╝ ╚═╝  ╚═╝╚═╝  ╚═╝  ╚═══╝  ╚═╝╚══════╝"
 echo -e "${NC}"
 echo -e "${BOLD}Just A Rather Very Intelligent System${NC}"
-echo ""
-echo "Instalador unificado para Raspberry Pi 5"
-echo "═══════════════════════════════════════════"
+echo -e "Instalador unificado v2"
+echo "═══════════════════════════════════════════════"
 echo ""
 
 # ─── Verificar root ───
 if [ "$EUID" -ne 0 ]; then
-    echo -e "${RED}Error: Ejecuta este script con sudo${NC}"
-    echo "  sudo bash install.sh"
+    echo -e "${RED}Error: Ejecuta con sudo${NC}"
+    echo "  sudo bash $0"
     exit 1
 fi
 
 # ─── Verificar internet ───
-echo -n "Verificando conexión a internet... "
+echo -n "Verificando internet... "
 if curl -s --connect-timeout 5 https://1.1.1.1/cdn-cgi/trace > /dev/null 2>&1; then
     echo -e "${GREEN}OK${NC}"
 else
     echo -e "${RED}SIN CONEXIÓN${NC}"
-    echo "Se necesita internet para la instalación inicial."
+    echo "Se necesita internet para la instalación."
     exit 1
 fi
 
-# ─── Detectar NVMe ───
+# ─── Verificar que el repo existe ───
+if [ ! -f "$JARVIS_DIR/extensions/docker-compose.yml" ]; then
+    echo ""
+    echo -e "${YELLOW}Jarvis no encontrado en $JARVIS_DIR${NC}"
+    echo "Clonando repositorio..."
+    apt-get update -qq && apt-get install -y -qq git
+    git clone https://github.com/Ambidiosidad/jarvis.git $JARVIS_DIR
+fi
+
+# ═══════════════════════════════════════════════════
+#  PASO 1: ALMACENAMIENTO
+# ═══════════════════════════════════════════════════
 echo ""
-echo -e "${BOLD}[1/8] Detectando almacenamiento...${NC}"
-NVME_DEVICE=""
+echo -e "${BOLD}[1/8] Configurando almacenamiento...${NC}"
+
 if [ -b /dev/nvme0n1 ]; then
-    NVME_DEVICE="/dev/nvme0n1"
-    echo -e "  NVMe detectado: ${GREEN}$NVME_DEVICE${NC}"
+    echo -e "  NVMe detectado: ${GREEN}/dev/nvme0n1${NC}"
     
-    # Verificar si ya está montado
     if mountpoint -q /data 2>/dev/null; then
-        echo -e "  /data ya está montado: ${GREEN}OK${NC}"
+        ok "/data ya montado"
     else
-        echo -e "  ${YELLOW}NVMe no está montado. ¿Formatear y montar en /data?${NC}"
-        echo -e "  ${RED}AVISO: Esto borrará todo el contenido del NVMe${NC}"
-        read -p "  ¿Continuar? (s/N): " FORMAT_NVME
-        if [[ "$FORMAT_NVME" =~ ^[sS]$ ]]; then
-            echo "  Formateando NVMe..."
-            parted $NVME_DEVICE --script mklabel gpt
-            parted $NVME_DEVICE --script mkpart primary ext4 0% 100%
-            mkfs.ext4 -F ${NVME_DEVICE}p1
+        warn "NVMe no montado."
+        echo -e "  ${RED}AVISO: Formatear borrará todo el NVMe${NC}"
+        if ask_yes "¿Formatear y montar en /data?"; then
+            parted /dev/nvme0n1 --script mklabel gpt
+            parted /dev/nvme0n1 --script mkpart primary ext4 0% 100%
+            sleep 2  # Esperar a que el kernel detecte la partición
+            mkfs.ext4 -F /dev/nvme0n1p1
             mkdir -p /data
-            mount ${NVME_DEVICE}p1 /data
-            echo "${NVME_DEVICE}p1 /data ext4 defaults,noatime 0 2" >> /etc/fstab
-            echo -e "  ${GREEN}NVMe formateado y montado en /data${NC}"
+            mount /dev/nvme0n1p1 /data
+            # Evitar duplicados en fstab
+            grep -q "nvme0n1p1" /etc/fstab || \
+                echo "/dev/nvme0n1p1 /data ext4 defaults,noatime 0 2" >> /etc/fstab
+            ok "NVMe formateado y montado"
         else
-            echo "  Usando almacenamiento en MicroSD (no recomendado)"
             DATA_DIR="/opt/jarvis/data"
+            warn "Usando MicroSD (no recomendado para producción)"
         fi
     fi
+
+    # Configurar swap en NVMe
+    if mountpoint -q /data 2>/dev/null; then
+        dphys-swapfile swapoff 2>/dev/null || true
+        sed -i "s|CONF_SWAPFILE=.*|CONF_SWAPFILE=/data/swapfile|" /etc/dphys-swapfile 2>/dev/null || true
+        sed -i "s|CONF_SWAPSIZE=.*|CONF_SWAPSIZE=4096|" /etc/dphys-swapfile 2>/dev/null || true
+        dphys-swapfile setup 2>/dev/null || true
+        dphys-swapfile swapon 2>/dev/null || true
+        ok "Swap 4GB en NVMe"
+    fi
 else
-    echo -e "  ${YELLOW}NVMe no detectado. Usando MicroSD.${NC}"
+    warn "NVMe no detectado. Usando MicroSD."
     DATA_DIR="/opt/jarvis/data"
 fi
 
-# ─── Configurar swap ───
+# Crear estructura de directorios
+mkdir -p $DATA_DIR/{ollama,qdrant,memory,voice/models,voice/audio,zim}
+
+# Mostrar espacio disponible
 if [ -d "/data" ]; then
-    echo "  Configurando swap en NVMe..."
-    dphys-swapfile swapoff 2>/dev/null || true
-    sed -i "s|CONF_SWAPFILE=.*|CONF_SWAPFILE=/data/swapfile|" /etc/dphys-swapfile
-    sed -i "s|CONF_SWAPSIZE=.*|CONF_SWAPSIZE=4096|" /etc/dphys-swapfile
-    dphys-swapfile setup
-    dphys-swapfile swapon
-    echo -e "  Swap 4GB en NVMe: ${GREEN}OK${NC}"
+    AVAIL=$(df -h /data | tail -1 | awk '{print $4}')
+    info "Espacio disponible: $AVAIL"
 fi
 
-# ─── Instalar Docker ───
+# ═══════════════════════════════════════════════════
+#  PASO 2: DOCKER
+# ═══════════════════════════════════════════════════
 echo ""
-echo -e "${BOLD}[2/8] Instalando Docker...${NC}"
+echo -e "${BOLD}[2/8] Configurando Docker...${NC}"
+
 if command -v docker &> /dev/null; then
-    echo -e "  Docker ya instalado: ${GREEN}$(docker --version)${NC}"
+    ok "Docker instalado: $(docker --version | cut -d' ' -f3)"
 else
     echo "  Instalando Docker..."
     apt-get update -qq
     apt-get install -y -qq docker.io docker-compose-plugin
     systemctl enable docker
     systemctl start docker
-    echo -e "  ${GREEN}Docker instalado${NC}"
+    ok "Docker instalado"
 fi
 
-# Redirigir Docker al NVMe si disponible
-if [ -d "/data" ] && [ ! -d "/data/docker" ]; then
+# Redirigir Docker al NVMe
+if mountpoint -q /data 2>/dev/null && [ ! -f "/etc/docker/daemon.json" ]; then
     echo "  Moviendo Docker al NVMe..."
-    systemctl stop docker
+    systemctl stop docker 2>/dev/null || true
     mkdir -p /data/docker
-    if [ -d "/var/lib/docker" ]; then
-        rsync -aP /var/lib/docker/ /data/docker/ 2>/dev/null || true
-    fi
+    rsync -a /var/lib/docker/ /data/docker/ 2>/dev/null || true
     mkdir -p /etc/docker
-    cat > /etc/docker/daemon.json <<EOF
+    cat > /etc/docker/daemon.json <<DOCKEREOF
 {
   "data-root": "/data/docker",
   "storage-driver": "overlay2",
   "log-driver": "json-file",
   "log-opts": {"max-size": "10m", "max-file": "3"}
 }
-EOF
+DOCKEREOF
     systemctl start docker
-    echo -e "  Docker en NVMe: ${GREEN}OK${NC}"
+    ok "Docker en NVMe"
+elif [ -f "/etc/docker/daemon.json" ]; then
+    ok "Docker ya configurado"
 fi
 
-# ─── Instalar dependencias ───
+# ═══════════════════════════════════════════════════
+#  PASO 3: DEPENDENCIAS DEL SISTEMA
+# ═══════════════════════════════════════════════════
 echo ""
-echo -e "${BOLD}[3/8] Instalando dependencias del sistema...${NC}"
+echo -e "${BOLD}[3/8] Dependencias del sistema...${NC}"
 apt-get update -qq
 apt-get install -y -qq \
     git curl wget \
     portaudio19-dev libsndfile1 espeak-ng ffmpeg \
-    chromium-browser unclutter xdotool \
-    alsa-utils pulseaudio 2>/dev/null
-echo -e "  ${GREEN}Dependencias instaladas${NC}"
-
-# ─── Clonar Jarvis ───
-echo ""
-echo -e "${BOLD}[4/8] Descargando Jarvis...${NC}"
-if [ -d "$JARVIS_DIR" ]; then
-    echo "  Directorio $JARVIS_DIR ya existe. Actualizando..."
-    cd $JARVIS_DIR && git pull 2>/dev/null || true
-else
-    git clone $REPO_URL $JARVIS_DIR
+    alsa-utils 2>/dev/null
+# Chromium solo si hay pantalla
+if [ -n "$DISPLAY" ] || [ -d "/dev/dri" ]; then
+    apt-get install -y -qq chromium-browser unclutter xdotool 2>/dev/null
 fi
-echo -e "  ${GREEN}Jarvis descargado en $JARVIS_DIR${NC}"
+ok "Dependencias instaladas"
 
-# ─── Crear directorios de datos ───
-mkdir -p $DATA_DIR/{ollama,qdrant,memory,voice/models,voice/audio,zim,maps}
-
-# ─── Construir y levantar servicios ───
+# ═══════════════════════════════════════════════════
+#  PASO 4: ACTUALIZAR CÓDIGO
+# ═══════════════════════════════════════════════════
 echo ""
-echo -e "${BOLD}[5/8] Construyendo servicios Jarvis...${NC}"
+echo -e "${BOLD}[4/8] Actualizando Jarvis...${NC}"
+cd $JARVIS_DIR
+git pull 2>/dev/null || true
+ok "Código actualizado"
+
+# ═══════════════════════════════════════════════════
+#  PASO 5: CONSTRUIR Y LEVANTAR SERVICIOS
+# ═══════════════════════════════════════════════════
+echo ""
+echo -e "${BOLD}[5/8] Construyendo servicios...${NC}"
 cd $JARVIS_DIR/extensions
-docker compose build
-docker compose up -d
-echo ""
 
-# Esperar a que los servicios arranquen
-echo "  Esperando servicios..."
-for i in $(seq 1 30); do
-    if curl -s http://localhost:8401/health > /dev/null 2>&1; then
-        break
-    fi
-    sleep 2
-done
-echo -e "  ${GREEN}Servicios activos${NC}"
+# Parar contenedores anteriores si existen
+docker compose down 2>/dev/null || true
 
-# ─── Modelos de IA ───
+echo "  Construyendo imágenes (puede tardar unos minutos)..."
+docker compose build >> $LOG_FILE 2>&1
+
+echo "  Levantando servicios..."
+docker compose up -d >> $LOG_FILE 2>&1
+
+# Esperar a servicios críticos
+echo "  Esperando a que arranquen..."
+if wait_for_service "http://localhost:11434/api/tags" "Ollama" 60; then
+    ok "Ollama activo"
+else
+    fail "Ollama no respondió (revisar: docker logs jarvis_ollama)"
+fi
+
+if wait_for_service "http://localhost:8401/health" "Memory" 30; then
+    ok "Memory activo"
+fi
+
+if wait_for_service "http://localhost:8402/health" "Voice" 30; then
+    ok "Voice activo"
+fi
+
+if wait_for_service "http://localhost:8403/health" "Brain" 30; then
+    ok "Brain activo"
+fi
+
+# ═══════════════════════════════════════════════════
+#  PASO 6: MODELOS DE IA
+# ═══════════════════════════════════════════════════
 echo ""
 echo -e "${BOLD}[6/8] Modelos de inteligencia artificial${NC}"
 echo ""
+info "Los modelos se almacenan en $DATA_DIR/ollama/"
+echo ""
 
 # Gemma3 1B
-echo -e "  ${CYAN}Gemma3 1B${NC} — Conversación rápida (1.5 GB)"
-echo "  Velocidad: ~10-15 tok/s en Pi 5"
-read -p "  ¿Descargar? [S/n]: " DL_GEMMA
-if [[ ! "$DL_GEMMA" =~ ^[nN]$ ]]; then
-    echo "  Descargando gemma3:1b..."
+echo -e "  ${CYAN}Gemma3 1B${NC} — Conversación rápida"
+info "Tamaño: 1.5 GB | Velocidad Pi 5: ~10-15 tok/s"
+if ask_yes "¿Descargar?"; then
     docker exec jarvis_ollama ollama pull gemma3:1b
-    echo -e "  ${GREEN}gemma3:1b instalado${NC}"
+    ok "gemma3:1b listo"
 fi
 echo ""
 
 # Qwen2.5 3B
-echo -e "  ${CYAN}Qwen2.5 3B${NC} — Razonamiento y lógica (2 GB)"
-echo "  Velocidad: ~4-6 tok/s en Pi 5"
-read -p "  ¿Descargar? [S/n]: " DL_QWEN
-if [[ ! "$DL_QWEN" =~ ^[nN]$ ]]; then
-    echo "  Descargando qwen2.5:3b..."
+echo -e "  ${CYAN}Qwen2.5 3B${NC} — Razonamiento y lógica"
+info "Tamaño: 2 GB | Velocidad Pi 5: ~4-6 tok/s"
+if ask_yes "¿Descargar?"; then
     docker exec jarvis_ollama ollama pull qwen2.5:3b
-    echo -e "  ${GREEN}qwen2.5:3b instalado${NC}"
+    ok "qwen2.5:3b listo"
 fi
 echo ""
 
 # Embeddings
-echo -e "  ${CYAN}nomic-embed-text${NC} — Embeddings para RAG (270 MB)"
-echo "  Necesario para búsqueda en documentos"
-read -p "  ¿Descargar? [S/n]: " DL_EMBED
-if [[ ! "$DL_EMBED" =~ ^[nN]$ ]]; then
-    echo "  Descargando nomic-embed-text..."
+echo -e "  ${CYAN}nomic-embed-text${NC} — Embeddings para documentos (RAG)"
+info "Tamaño: 270 MB | Necesario para buscar en documentos propios"
+if ask_yes "¿Descargar?"; then
     docker exec jarvis_ollama ollama pull nomic-embed-text
-    echo -e "  ${GREEN}nomic-embed-text instalado${NC}"
+    ok "nomic-embed-text listo"
 fi
 
 echo ""
 echo "  Modelos instalados:"
-docker exec jarvis_ollama ollama list
+docker exec jarvis_ollama ollama list 2>/dev/null | sed 's/^/    /'
 
-# ─── Contenido offline ───
+# ═══════════════════════════════════════════════════
+#  PASO 7: CONTENIDO OFFLINE
+# ═══════════════════════════════════════════════════
 echo ""
-echo -e "${BOLD}[7/8] Contenido offline${NC}"
+echo -e "${BOLD}[7/8] Contenido offline (Wikipedia, medicina, etc.)${NC}"
 echo ""
-echo "  Los archivos ZIM se descargan en $DATA_DIR/zim/"
-echo "  Kiwix los servirá automáticamente en http://localhost:8500"
+info "Los archivos ZIM se guardan en $DATA_DIR/zim/"
+info "Kiwix los sirve en http://localhost:8500"
+info "Puedes añadir más ZIMs después copiándolos a esa carpeta."
 echo ""
 
-SPACE_USED=0
-
-# Wikipedia ES
-echo -e "  ${CYAN}Wikipedia Español${NC} (sin imágenes) — ~9 GB"
-echo "  Conocimiento general completo en español"
-read -p "  ¿Descargar? [S/n]: " DL_WIKI_ES
-if [[ ! "$DL_WIKI_ES" =~ ^[nN]$ ]]; then
-    echo "  Descargando Wikipedia ES (esto tarda un rato)..."
-    wget -q --show-progress -O "$DATA_DIR/zim/wikipedia_es_all_nopic.zim" \
-        "$KIWIX_DOWNLOAD/wikipedia/wikipedia_es_all_nopic_2025-11.zim" 2>&1 || \
-    echo -e "  ${YELLOW}Descarga no disponible. Descárgala manualmente desde library.kiwix.org${NC}"
-    SPACE_USED=$((SPACE_USED + 9))
+if [ -d "/data" ]; then
+    AVAIL=$(df -BG /data | tail -1 | awk '{print $4}' | tr -d 'G')
+    info "Espacio disponible: ${AVAIL}GB"
+    echo ""
 fi
-echo ""
 
-# Wikipedia EN
-echo -e "  ${CYAN}Wikipedia English${NC} (sin imágenes) — ~12 GB"
-echo "  Contenido más extenso que la versión española"
-read -p "  ¿Descargar? [S/n]: " DL_WIKI_EN
-if [[ ! "$DL_WIKI_EN" =~ ^[nN]$ ]]; then
-    echo "  Descargando Wikipedia EN (esto tarda bastante)..."
-    wget -q --show-progress -O "$DATA_DIR/zim/wikipedia_en_all_nopic.zim" \
-        "$KIWIX_DOWNLOAD/wikipedia/wikipedia_en_all_nopic_2025-11.zim" 2>&1 || \
-    echo -e "  ${YELLOW}Descarga no disponible. Descárgala manualmente desde library.kiwix.org${NC}"
-    SPACE_USED=$((SPACE_USED + 12))
+download_zim "Wikipedia Español (sin imágenes)" \
+    "wikipedia_es_all_nopic.zim" \
+    "$KIWIX_BASE/wikipedia/wikipedia_es_all_nopic_2025-11.zim" \
+    "9 GB — Conocimiento general completo en español"
+
+download_zim "Wikipedia English (sin imágenes)" \
+    "wikipedia_en_all_nopic.zim" \
+    "$KIWIX_BASE/wikipedia/wikipedia_en_all_nopic_2025-11.zim" \
+    "12 GB — Más contenido que la versión española"
+
+download_zim "WikiMed (medicina)" \
+    "wikimed.zim" \
+    "$KIWIX_BASE/other/mdwiki_en_all_nopic.zim" \
+    "1 GB — Referencia médica especializada"
+
+download_zim "Wikibooks ES" \
+    "wikibooks_es.zim" \
+    "$KIWIX_BASE/wikibooks/wikibooks_es_all_nopic.zim" \
+    "500 MB — Manuales y tutoriales en español"
+
+download_zim "Wiktionary ES (diccionario)" \
+    "wiktionary_es.zim" \
+    "$KIWIX_BASE/wiktionary/wiktionary_es_all_nopic.zim" \
+    "1 GB — Definiciones y traducciones"
+
+echo ""
+echo -e "  ${CYAN}Stack Exchange${NC} — ~25 GB (grande)"
+info "Programación, ciencia, tecnología — respuestas de calidad"
+if ask_no "¿Descargar? (25GB, tarda bastante)"; then
+    download_zim "Stack Exchange" \
+        "stackexchange.zim" \
+        "$KIWIX_BASE/stack_exchange/stackexchange_en_all.zim" \
+        "25 GB"
 fi
-echo ""
 
-# Stack Exchange
-echo -e "  ${CYAN}Stack Exchange${NC} — ~25 GB"
-echo "  Programación, ciencia, tecnología (respuestas de calidad)"
-read -p "  ¿Descargar? [s/N]: " DL_STACK
-if [[ "$DL_STACK" =~ ^[sS]$ ]]; then
-    echo "  Descargando Stack Exchange..."
-    wget -q --show-progress -O "$DATA_DIR/zim/stackexchange.zim" \
-        "$KIWIX_DOWNLOAD/stack_exchange/stackexchange_en_all.zim" 2>&1 || \
-    echo -e "  ${YELLOW}Descarga no disponible. Descárgala manualmente desde library.kiwix.org${NC}"
-    SPACE_USED=$((SPACE_USED + 25))
-fi
+# Reiniciar Kiwix
 echo ""
-
-# WikiMed
-echo -e "  ${CYAN}WikiMed${NC} — ~1 GB"
-echo "  Referencia médica especializada"
-read -p "  ¿Descargar? [S/n]: " DL_MED
-if [[ ! "$DL_MED" =~ ^[nN]$ ]]; then
-    echo "  Descargando WikiMed..."
-    wget -q --show-progress -O "$DATA_DIR/zim/wikimed.zim" \
-        "$KIWIX_DOWNLOAD/other/mdwiki_en_all_nopic.zim" 2>&1 || \
-    echo -e "  ${YELLOW}Descarga no disponible. Descárgala manualmente desde library.kiwix.org${NC}"
-    SPACE_USED=$((SPACE_USED + 1))
-fi
-echo ""
-
-# Wikibooks
-echo -e "  ${CYAN}Wikibooks ES+EN${NC} — ~2 GB"
-echo "  Manuales y tutoriales"
-read -p "  ¿Descargar? [S/n]: " DL_BOOKS
-if [[ ! "$DL_BOOKS" =~ ^[nN]$ ]]; then
-    echo "  Descargando Wikibooks..."
-    wget -q --show-progress -O "$DATA_DIR/zim/wikibooks_es.zim" \
-        "$KIWIX_DOWNLOAD/wikibooks/wikibooks_es_all_nopic.zim" 2>&1 || true
-    wget -q --show-progress -O "$DATA_DIR/zim/wikibooks_en.zim" \
-        "$KIWIX_DOWNLOAD/wikibooks/wikibooks_en_all_nopic.zim" 2>&1 || true
-    SPACE_USED=$((SPACE_USED + 2))
-fi
-echo ""
-
-# Wiktionary
-echo -e "  ${CYAN}Wiktionary ES${NC} (diccionario) — ~1 GB"
-read -p "  ¿Descargar? [S/n]: " DL_DICT
-if [[ ! "$DL_DICT" =~ ^[nN]$ ]]; then
-    echo "  Descargando Wiktionary ES..."
-    wget -q --show-progress -O "$DATA_DIR/zim/wiktionary_es.zim" \
-        "$KIWIX_DOWNLOAD/wiktionary/wiktionary_es_all_nopic.zim" 2>&1 || true
-    SPACE_USED=$((SPACE_USED + 1))
-fi
-echo ""
-
-# Reiniciar Kiwix para que detecte los nuevos ZIMs
-echo "  Reiniciando Kiwix..."
+echo "  Reiniciando Kiwix para detectar contenido nuevo..."
 docker restart jarvis_kiwix 2>/dev/null || true
+sleep 3
+if wait_for_service "http://localhost:8500" "Kiwix" 15; then
+    ok "Kiwix activo con contenido offline"
+else
+    warn "Kiwix no arrancó (necesita al menos un archivo ZIM)"
+fi
 
-# ─── Configurar kiosko ───
+# ═══════════════════════════════════════════════════
+#  PASO 8: PANTALLA Y ARRANQUE AUTOMÁTICO
+# ═══════════════════════════════════════════════════
 echo ""
-echo -e "${BOLD}[8/8] Configurando pantalla${NC}"
+echo -e "${BOLD}[8/8] Configuración final${NC}"
 echo ""
 
-read -p "  ¿Configurar pantalla táctil en modo kiosko? [S/n]: " SETUP_KIOSK
-if [[ ! "$SETUP_KIOSK" =~ ^[nN]$ ]]; then
+# Kiosko
+if ask_yes "¿Configurar pantalla táctil en modo kiosko?"; then
     REAL_USER=${SUDO_USER:-$USER}
     REAL_HOME=$(eval echo ~$REAL_USER)
-    
-    # Script de arranque del kiosko
+
     cat > "$REAL_HOME/start_jarvis_kiosk.sh" << 'KIOSK'
 #!/bin/bash
 echo "J.A.R.V.I.S. — Iniciando interfaz..."
@@ -330,17 +404,17 @@ until curl -s http://localhost:8403/health > /dev/null 2>&1; do
     sleep 3
 done
 unclutter -idle 3 &
-xset s off; xset -dpms; xset s noblank
+xset s off 2>/dev/null; xset -dpms 2>/dev/null; xset s noblank 2>/dev/null
 chromium-browser \
     --kiosk --noerrdialogs --disable-infobars \
     --disable-session-crashed-bubble --disable-translate \
     --no-first-run --start-fullscreen \
     --autoplay-policy=no-user-gesture-required \
-    http://localhost:8403/chat
+    http://localhost:8500
 KIOSK
     chmod +x "$REAL_HOME/start_jarvis_kiosk.sh"
-    
-    # Autostart
+    chown $REAL_USER:$REAL_USER "$REAL_HOME/start_jarvis_kiosk.sh"
+
     mkdir -p "$REAL_HOME/.config/autostart"
     cat > "$REAL_HOME/.config/autostart/jarvis-kiosk.desktop" << DESKTOP
 [Desktop Entry]
@@ -349,13 +423,12 @@ Name=J.A.R.V.I.S. Kiosk
 Exec=$REAL_HOME/start_jarvis_kiosk.sh
 X-GNOME-Autostart-enabled=true
 DESKTOP
-    echo -e "  ${GREEN}Kiosko configurado${NC}"
-else
-    echo "  Kiosko omitido"
+    chown $REAL_USER:$REAL_USER "$REAL_HOME/.config/autostart/jarvis-kiosk.desktop"
+    ok "Kiosko configurado"
 fi
 
-# ─── Crear servicio systemd ───
-cat > /etc/systemd/system/jarvis.service << EOF
+# Servicio systemd
+cat > /etc/systemd/system/jarvis.service << SVCEOF
 [Unit]
 Description=Project J.A.R.V.I.S.
 After=docker.service
@@ -370,49 +443,68 @@ WorkingDirectory=$JARVIS_DIR
 
 [Install]
 WantedBy=multi-user.target
-EOF
+SVCEOF
 
 systemctl daemon-reload
 systemctl enable jarvis.service
+ok "Arranque automático configurado"
 
-# ─── Resumen final ───
+# ═══════════════════════════════════════════════════
+#  RESUMEN FINAL
+# ═══════════════════════════════════════════════════
 echo ""
-echo -e "${CYAN}═══════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}${BOLD}  J.A.R.V.I.S. instalado correctamente!${NC}"
+echo -e "${CYAN}═══════════════════════════════════════════════════════${NC}"
+echo -e "${GREEN}${BOLD}"
+echo "     ██╗ █████╗ ██████╗ ██╗   ██╗██╗███████╗"
+echo "     ██║██╔══██╗██╔══██╗██║   ██║██║██╔════╝"
+echo "     ██║███████║██████╔╝██║   ██║██║███████╗"
+echo "██   ██║██╔══██║██╔══██╗╚██╗ ██╔╝██║╚════██║"
+echo "╚█████╔╝██║  ██║██║  ██║ ╚████╔╝ ██║███████║"
+echo " ╚════╝ ╚═╝  ╚═╝╚═╝  ╚═╝  ╚═══╝  ╚═╝╚══════╝"
+echo -e "${NC}"
+echo -e "${BOLD}  Instalación completada!${NC}"
 echo ""
-echo "  Directorio:    $JARVIS_DIR"
-echo "  Datos:         $DATA_DIR"
-echo ""
-echo "  Servicios:"
-echo "    Brain:       http://localhost:8403"
-echo "    Memory:      http://localhost:8401"
-echo "    Voice:       http://localhost:8402"
-echo "    Ollama:      http://localhost:11434"
-echo "    Kiwix:       http://localhost:8500"
-echo "    Qdrant:      http://localhost:6333"
+echo "  Directorio:  $JARVIS_DIR"
+echo "  Datos:       $DATA_DIR"
 echo ""
 
-# Calcular espacio
+# Espacio
 if [ -d "/data" ]; then
     USED=$(df -h /data | tail -1 | awk '{print $3}')
     AVAIL=$(df -h /data | tail -1 | awk '{print $4}')
-    echo "  Almacenamiento: $USED usado / $AVAIL disponible"
+    echo "  Disco: $USED usado / $AVAIL disponible"
 fi
 
 echo ""
+echo "  Servicios activos:"
+docker ps --format "    {{.Names}}\t{{.Status}}" 2>/dev/null | grep jarvis
+echo ""
 echo "  Modelos IA:"
-docker exec jarvis_ollama ollama list 2>/dev/null || echo "    (verificar después)"
+docker exec jarvis_ollama ollama list 2>/dev/null | tail -n +2 | sed 's/^/    /'
 echo ""
-echo -e "  ${YELLOW}Ya puedes desconectar internet.${NC}"
-echo -e "  ${YELLOW}Jarvis funcionará 100% offline.${NC}"
+
+# Test rápido
+echo -n "  Test de Jarvis... "
+RESPONSE=$(curl -s -X POST "http://localhost:8403/chat?message=Hola" 2>/dev/null)
+if echo "$RESPONSE" | grep -q "response"; then
+    echo -e "${GREEN}Jarvis responde!${NC}"
+else
+    echo -e "${YELLOW}Verificar manualmente${NC}"
+fi
+
 echo ""
-echo "  Comandos útiles:"
-echo "    Hablar con Jarvis:   curl -X POST 'http://localhost:8403/chat?message=Hola'"
-echo "    Ver memoria:         curl http://localhost:8401/stats"
-echo "    Ver emociones:       curl http://localhost:8401/emotions/current"
-echo "    Estado del sistema:  curl http://localhost:8403/status"
-echo "    Reiniciar:           sudo systemctl restart jarvis"
-echo "    Parar:               sudo systemctl stop jarvis"
-echo "    Wikipedia offline:   http://localhost:8500"
+echo -e "  ${YELLOW}════════════════════════════════════════════════${NC}"
+echo -e "  ${YELLOW}  Ya puedes desconectar internet.${NC}"
+echo -e "  ${YELLOW}  Jarvis funcionará 100% offline para siempre.${NC}"
+echo -e "  ${YELLOW}════════════════════════════════════════════════${NC}"
 echo ""
-echo -e "${CYAN}═══════════════════════════════════════════════════${NC}"
+echo "  Comandos:"
+echo "    Hablar:     curl -X POST 'http://localhost:8403/chat?message=Hola'"
+echo "    Memoria:    curl http://localhost:8401/stats"
+echo "    Emociones:  curl http://localhost:8401/emotions/current"
+echo "    Wikipedia:  http://localhost:8500"
+echo "    Reiniciar:  sudo systemctl restart jarvis"
+echo "    Parar:      sudo systemctl stop jarvis"
+echo "    Desinstalar: sudo bash $JARVIS_DIR/scripts/jarvis/uninstall.sh"
+echo ""
+echo -e "${CYAN}═══════════════════════════════════════════════════════${NC}"
