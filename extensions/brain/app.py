@@ -28,6 +28,7 @@ MEMORY = os.getenv("MEMORY_URL", "http://jarvis-memory:8401")
 VOICE = os.getenv("VOICE_URL", "http://jarvis-voice:8402")
 MOTORS = os.getenv("MOTORS_URL", "http://jarvis-motors:8404")
 MODEL = os.getenv("MODEL_NAME", "gemma3:1b")
+MODEL_REASONING = os.getenv("MODEL_REASONING", "qwen2.5:3b")
 ASCII_ONLY = os.getenv("JARVIS_ASCII_ONLY", "false").strip().lower() in {
     "1", "true", "yes", "on"
 }
@@ -146,7 +147,8 @@ def _sanitize_emotion(emotion: dict) -> dict:
 
 async def _call_llm_chat(user_msg: str, system: str,
                          history: list[dict],
-                         max_tokens: int = 512) -> str:
+                         max_tokens: int = 512,
+                         model: str = None) -> str:
     """
     Call Ollama with chat API (multi-turn) instead of generate API.
     This gives the LLM context of the recent conversation.
@@ -165,7 +167,7 @@ async def _call_llm_chat(user_msg: str, system: str,
 
     async with httpx.AsyncClient(timeout=120) as c:
         r = await c.post(f"{OLLAMA}/api/chat", json={
-            "model": MODEL,
+            "model": model or MODEL,
             "messages": messages,
             "stream": False,
             "options": {
@@ -347,8 +349,9 @@ async def _think(user_msg: str) -> dict:
     # 7. Get recent conversation history for multi-turn
     history = await _get_recent_messages()
 
-    # 8. Call LLM with full context
-    raw = await _call_llm_chat(user_msg, system, history)
+    # 8. Select model based on intent and call LLM
+    active_model = MODEL_REASONING if intent in ("logic", "factual") else MODEL
+    raw = await _call_llm_chat(user_msg, system, history, model=active_model)
 
     # 9. Save response
     await _save_msg("assistant", raw)
@@ -374,6 +377,7 @@ async def _think(user_msg: str) -> dict:
         "tools": tool_calls,
         "emotion": _sanitize_emotion(new_emotion),
         "intent": intent,
+        "model_used": active_model,
     }
 
 
@@ -389,6 +393,7 @@ async def chat(message: str):
         "tools_executed": result["tools"],
         "emotion": _sanitize_emotion(result["emotion"]),
         "intent": result["intent"],
+        "model_used": result["model_used"],
     }
 
 
