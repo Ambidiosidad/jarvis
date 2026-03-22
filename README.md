@@ -33,11 +33,16 @@ Wikipedia, Stack Exchange, referencia médica y mapas.
 
 ## Instalación en Raspberry Pi 5
 
-Un solo comando:
+### Modo privado (actual para testing)
+
+Este repositorio está en privado mientras se valida la instalación.
+Usa clone + script local:
 
 ```bash
-sudo apt-get update && sudo apt-get install -y curl git
-git clone https://github.com/Ambidiosidad/jarvis.git /opt/jarvis
+sudo apt-get update && sudo apt-get install -y git curl
+git clone git@github.com:Ambidiosidad/jarvis.git /opt/jarvis
+# alternativa HTTPS con credenciales/PAT:
+# git clone https://github.com/Ambidiosidad/jarvis.git /opt/jarvis
 sudo bash /opt/jarvis/scripts/jarvis/install.sh
 ```
 
@@ -46,6 +51,14 @@ construye los servicios, y te pregunta qué modelos de IA y contenido
 offline quieres descargar.
 
 Cuando termine, desconecta internet. Jarvis es autónomo.
+
+### Modo público (opcional)
+
+Cuando el repo sea público, también puedes usar:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Ambidiosidad/jarvis/main/scripts/jarvis/install.sh | sudo bash
+```
 
 ## Desarrollo local (sin Raspberry Pi)
 
@@ -114,6 +127,7 @@ jarvis/
 │   └── motors/                  ←   GPIO (Fase 2)
 ├── scripts/jarvis/
 │   ├── install.sh               ←   Instalador unificado
+│   ├── smoke_test.sh            ←   Validación post-instalación
 │   ├── start.sh                 ←   Arranque
 │   ├── stop.sh                  ←   Parada
 │   └── uninstall.sh             ←   Desinstalación
@@ -149,6 +163,9 @@ sudo systemctl restart jarvis
 
 # Ver logs
 cd /opt/jarvis/extensions && docker compose logs -f jarvis-brain
+
+# Smoke test completo (health + chat)
+sudo bash /opt/jarvis/scripts/jarvis/smoke_test.sh
 
 # Hablar con Jarvis
 curl -X POST "http://localhost:8403/chat?message=Hola"
