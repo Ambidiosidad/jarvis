@@ -1,16 +1,45 @@
 version: "3.8"
 
 # ═══════════════════════════════════════════════════════
-#  J.A.R.V.I.S. — Extensiones (Producción en Pi 5)
-#  Se ejecuta JUNTO a N.O.M.A.D., compartiendo su red Docker.
+#  J.A.R.V.I.S. — Docker Compose Producción (Raspberry Pi 5)
+#  Stack completo autocontenido. No depende de N.O.M.A.D.
 # ═══════════════════════════════════════════════════════
 
 networks:
-  nomad_net:
-    external: true
-    name: project-nomad_default  # Red creada por N.O.M.A.D.
+  jarvis_net:
+    driver: bridge
 
 services:
+  # ─── INFRAESTRUCTURA ───
+  jarvis-ollama:
+    image: ollama/ollama:latest
+    container_name: jarvis_ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - /data/jarvis/ollama:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+      - OLLAMA_CONTEXT_LENGTH=4096
+      - OLLAMA_NUM_PARALLEL=1
+      - OLLAMA_MAX_LOADED_MODELS=1
+    networks:
+      - jarvis_net
+
+  jarvis-qdrant:
+    image: qdrant/qdrant:v1.16
+    container_name: jarvis_qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - /data/jarvis/qdrant:/qdrant/storage
+    networks:
+      - jarvis_net
+
+  # ─── MEMORIA PERSISTENTE ───
   jarvis-memory:
     build: ./memory
     container_name: jarvis-memory
@@ -20,13 +49,14 @@ services:
     volumes:
       - /data/jarvis/memory:/app/data
     networks:
-      - nomad_net
+      - jarvis_net
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8401/health"]
       interval: 30s
       timeout: 5s
       retries: 3
 
+  # ─── VOZ: STT + TTS ───
   jarvis-voice:
     build: ./voice
     container_name: jarvis-voice
@@ -39,13 +69,14 @@ services:
     devices:
       - /dev/snd:/dev/snd
     networks:
-      - nomad_net
+      - jarvis_net
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8402/health"]
       interval: 30s
       timeout: 10s
       retries: 3
 
+  # ─── CEREBRO / ORQUESTADOR ───
   jarvis-brain:
     build: ./brain
     container_name: jarvis-brain
@@ -53,21 +84,34 @@ services:
     ports:
       - "8403:8403"
     environment:
-      - OLLAMA_URL=http://nomad_ollama:11434
-      - QDRANT_URL=http://nomad_qdrant:6333
+      - OLLAMA_URL=http://jarvis_ollama:11434
+      - QDRANT_URL=http://jarvis_qdrant:6333
       - MEMORY_URL=http://jarvis-memory:8401
       - VOICE_URL=http://jarvis-voice:8402
       - MOTORS_URL=http://jarvis-motors:8404
       - MODEL_NAME=gemma3:1b
+      - MODEL_REASONING=qwen2.5:3b
       - JARVIS_LANGUAGE=es
-      - JARVIS_ASCII_ONLY=false
     depends_on:
       jarvis-memory:
         condition: service_healthy
       jarvis-voice:
         condition: service_healthy
     networks:
-      - nomad_net
+      - jarvis_net
+
+  # ─── KIWIX (Wikipedia, medicina, Stack Exchange offline) ───
+  jarvis-kiwix:
+    image: ghcr.io/kiwix/kiwix-serve:3.8.2
+    container_name: jarvis_kiwix
+    restart: unless-stopped
+    ports:
+      - "8500:8080"
+    volumes:
+      - /data/jarvis/zim:/data
+    command: /data/*.zim
+    networks:
+      - jarvis_net
 
   # ─── MOTORES (Fase 2 — descomentar cuando tengas hardware) ───
   # jarvis-motors:
@@ -80,4 +124,4 @@ services:
   #     - /dev/gpiomem:/dev/gpiomem
   #   privileged: true
   #   networks:
-  #     - nomad_net
+  #     - jarvis_net

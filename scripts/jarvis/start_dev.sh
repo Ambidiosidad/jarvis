@@ -6,7 +6,7 @@ echo ""
 echo "Esperando servicios..."
 sleep 10
 echo "Descargando modelo (si es la primera vez)..."
-docker exec nomad_ollama ollama pull gemma3:1b 2>/dev/null || true
+docker exec jarvis_ollama ollama pull gemma3:1b 2>/dev/null || true
 echo ""
 echo "════════════════════════════════════════"
 echo "  J.A.R.V.I.S. dev listo!"

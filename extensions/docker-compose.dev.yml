@@ -7,14 +7,14 @@ version: "3.8"
 #  Uso:
 #    cd extensions/
 #    docker compose -f docker-compose.dev.yml up -d --build
-#    docker exec nomad_ollama ollama pull gemma3:1b
+#    docker exec jarvis_ollama ollama pull gemma3:1b
 #    curl -X POST "http://localhost:8403/chat?message=Hola Jarvis"
 # ═══════════════════════════════════════════════════════
 
 services:
   ollama-dev:
     image: ollama/ollama:latest
-    container_name: nomad_ollama
+    container_name: jarvis_ollama
     ports:
       - "11434:11434"
     volumes:
@@ -54,7 +54,7 @@ services:
     ports:
       - "8403:8403"
     environment:
-      - OLLAMA_URL=http://nomad_ollama:11434
+      - OLLAMA_URL=http://jarvis_ollama:11434
       - MEMORY_URL=http://jarvis-memory:8401
       - VOICE_URL=http://jarvis-voice:8402
       - MOTORS_URL=http://jarvis-motors:8404

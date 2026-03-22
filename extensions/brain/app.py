@@ -23,7 +23,7 @@ app.add_middleware(
     allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
 
-OLLAMA = os.getenv("OLLAMA_URL", "http://nomad_ollama:11434")
+OLLAMA = os.getenv("OLLAMA_URL", "http://jarvis_ollama:11434")
 MEMORY = os.getenv("MEMORY_URL", "http://jarvis-memory:8401")
 VOICE = os.getenv("VOICE_URL", "http://jarvis-voice:8402")
 MOTORS = os.getenv("MOTORS_URL", "http://jarvis-motors:8404")

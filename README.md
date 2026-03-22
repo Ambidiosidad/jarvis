@@ -1,137 +1,203 @@
-# 🤖 Project J.A.R.V.I.S.
+# Project J.A.R.V.I.S.
 
 ### Just A Rather Very Intelligent System
 
-Un asistente de IA offline con memoria persistente, conversación por voz,
-pantalla táctil integrada y capacidad de movimiento robótico — todo corriendo
-en una Raspberry Pi 5.
-
-> Construido sobre la base de [Project N.O.M.A.D.](https://github.com/Crosstalk-Solutions/project-nomad)
-> (Apache 2.0) de Crosstalk Solutions, al que extendemos con capas de
-> memoria, voz, orquestación inteligente y control robótico.
+Un asistente de IA autónomo y 100% offline con memoria persistente, conversación
+por voz, estado emocional evolutivo, pantalla táctil, y capacidad de movimiento
+robótico — todo corriendo en una Raspberry Pi 5.
 
 ---
 
-## ¿Qué es Jarvis?
+## Qué es Jarvis
 
-Jarvis toma el stack de N.O.M.A.D. (servidor offline con Wikipedia, mapas, IA local
-y herramientas) y lo transforma en un **robot conversacional autónomo** con
-personalidad, memoria a largo plazo y cuerpo físico.
+Jarvis es un robot conversacional con inteligencia artificial que funciona
+completamente sin internet. Tiene memoria a largo plazo, emociones que
+evolucionan con cada conversación, razonamiento lógico con selección
+automática de modelo, y una base de conocimiento offline que incluye
+Wikipedia, Stack Exchange, referencia médica y mapas.
 
-**Todo funciona 100% offline.** Internet solo se necesita durante la instalación.
+### Características
 
-### Stack base (heredado de N.O.M.A.D.)
-
-| Capacidad | Motor | Descripción |
-|---|---|---|
-| IA conversacional | Ollama + Qdrant | Chat con RAG y búsqueda semántica |
-| Biblioteca offline | Kiwix | Wikipedia, medicina, supervivencia |
-| Educación | Kolibri | Khan Academy offline |
-| Mapas | ProtoMaps | Mapas regionales offline |
-| Herramientas | CyberChef | Cifrado, codificación, análisis |
-| Notas | FlatNotes | Notas Markdown locales |
-
-### Extensiones Jarvis (nuevas)
-
-| Servicio | Puerto | Descripción |
-|---|---|---|
-| `jarvis-memory` | 8401 | Memoria persistente entre sesiones (SQLite) |
-| `jarvis-voice` | 8402 | STT (Whisper) + TTS (espeak-ng) offline |
-| `jarvis-brain` | 8403 | Orquestador con personalidad y tool-use |
-| `jarvis-motors` | 8404 | Control de motores DC vía GPIO (Fase 2) |
+- **100% offline** — Internet solo se necesita durante la instalación
+- **Modelo dual inteligente** — Gemma3 1B (conversación rápida) + Qwen2.5 3B (razonamiento)
+- **Memoria persistente** — Recuerda hechos, conversaciones y patrones entre sesiones
+- **Estado emocional** — Humor, energía, paciencia y vínculo que evolucionan
+- **Voz** — Reconocimiento (Whisper) y síntesis (espeak-ng) offline
+- **Conocimiento** — Wikipedia ES/EN, Stack Exchange, WikiMed, Wikibooks offline
+- **Mapas** — Navegación offline con ProtoMaps
+- **RAG** — Sube tus propios documentos y Jarvis los consulta
+- **Movimiento** — Control de motores DC (Fase 2)
+- **Pantalla táctil** — Interfaz directa en el robot
 
 ---
+
+## Instalación en Raspberry Pi 5
+
+Un solo comando:
+
+```bash
+sudo apt-get update && sudo apt-get install -y curl git
+git clone https://github.com/Ambidiosidad/jarvis.git /opt/jarvis
+sudo bash /opt/jarvis/scripts/jarvis/install.sh
+```
+
+El instalador te guía paso a paso: configura el NVMe, instala Docker,
+construye los servicios, y te pregunta qué modelos de IA y contenido
+offline quieres descargar.
+
+Cuando termine, desconecta internet. Jarvis es autónomo.
 
 ## Desarrollo local (sin Raspberry Pi)
 
-Puedes desarrollar y testear Jarvis en tu PC con Docker:
-
 ```bash
-# Clonar
-git clone https://github.com/Ambidiosidad/project-jarvis.git
-cd project-jarvis
-
-# Levantar entorno de desarrollo
-cd extensions
+git clone https://github.com/Ambidiosidad/jarvis.git
+cd jarvis/extensions
 docker compose -f docker-compose.dev.yml up -d --build
-
-# Descargar modelo de IA (primera vez, requiere internet)
-docker exec nomad_ollama ollama pull gemma3:1b
-
-# Hablar con Jarvis
-curl -X POST "http://localhost:8403/chat?message=Hola Jarvis, quién eres?"
+docker exec jarvis_ollama ollama pull gemma3:1b
+docker exec jarvis_ollama ollama pull qwen2.5:3b
 ```
 
-## Despliegue en Raspberry Pi 5
-
+Prueba:
 ```bash
-# 1. Instalar N.O.M.A.D. base
-sudo apt-get update && sudo apt-get install -y curl
-curl -fsSL https://raw.githubusercontent.com/Crosstalk-Solutions/project-nomad/refs/heads/main/install/install_nomad.sh \
-  -o install_nomad.sh && sudo bash install_nomad.sh
-
-# 2. Clonar Jarvis
-cd /data && git clone https://github.com/Ambidiosidad/project-jarvis.git
-cd project-jarvis/extensions
-
-# 3. Levantar extensiones (usa la red de N.O.M.A.D.)
-docker compose up -d --build
+curl -X POST "http://localhost:8403/chat?message=Hola Jarvis"
 ```
+
+---
+
+## Arquitectura
+
+```
+┌──────────────────────────────────────────┐
+│            J.A.R.V.I.S.                  │
+│                                          │
+│  jarvis-brain    — Orquestador (v3)      │
+│  jarvis-memory   — Memoria + emociones   │
+│  jarvis-voice    — STT + TTS offline     │
+│  jarvis-ollama   — LLM local             │
+│  jarvis-qdrant   — RAG vectorial         │
+│  jarvis-kiwix    — Wikipedia offline     │
+│  jarvis-motors   — Control GPIO (Fase 2) │
+└──────────────────────────────────────────┘
+```
+
+### Sistema de modelo dual
+
+| Situación | Modelo | Velocidad Pi 5 |
+|---|---|---|
+| Conversación, saludos, emociones | Gemma3 1B | ~10-15 tok/s |
+| Lógica, matemáticas, preguntas complejas | Qwen2.5 3B | ~4-6 tok/s |
+
+El clasificador de intención selecciona automáticamente el modelo
+según el tipo de pregunta.
+
+### Sistema emocional
+
+| Dimensión | Efecto |
+|---|---|
+| Humor | Tono de las respuestas (curious, happy, empathetic, thoughtful) |
+| Energía | Nivel de actividad y entusiasmo |
+| Paciencia | Tolerancia ante frustración del usuario |
+| Vínculo | Cercanía con el usuario — solo sube, nunca baja |
 
 ---
 
 ## Estructura del proyecto
 
 ```
-project-jarvis/
-├── admin/                       ← N.O.M.A.D. Command Center (TypeScript)
-├── collections/                 ← N.O.M.A.D. colecciones de contenido
-├── install/                     ← N.O.M.A.D. scripts de instalación
-├── extensions/                  ← JARVIS — extensiones nuevas
-│   ├── docker-compose.yml       ←   Producción (Pi 5 + N.O.M.A.D.)
-│   ├── docker-compose.dev.yml   ←   Desarrollo (PC, standalone)
-│   ├── memory/                  ←   Memoria persistente
-│   ├── voice/                   ←   STT + TTS offline
-│   ├── brain/                   ←   Orquestador inteligente
-│   └── motors/                  ←   Control GPIO (Fase 2)
-├── scripts/jarvis/              ← Scripts Jarvis
-├── config/jarvis/               ← Configuración
-├── docs/jarvis/                 ← Documentación
-├── Dockerfile                   ← N.O.M.A.D. original
-└── README.md                    ← Este archivo
+jarvis/
+├── extensions/                  ← Servicios Jarvis
+│   ├── docker-compose.yml       ←   Producción (Pi 5)
+│   ├── docker-compose.dev.yml   ←   Desarrollo (PC)
+│   ├── brain/                   ←   Orquestador v3
+│   ├── memory/                  ←   Memoria + emociones
+│   ├── voice/                   ←   STT + TTS
+│   └── motors/                  ←   GPIO (Fase 2)
+├── scripts/jarvis/
+│   ├── install.sh               ←   Instalador unificado
+│   ├── start.sh                 ←   Arranque
+│   ├── stop.sh                  ←   Parada
+│   └── uninstall.sh             ←   Desinstalación
+├── config/jarvis/
+│   └── jarvis.env               ←   Configuración
+├── docs/jarvis/                 ←   Documentación
+└── README.md
 ```
 
-## Verificación offline
+## Endpoints
 
-| Componente | Tecnología | Offline |
+| Servicio | URL | Función |
 |---|---|---|
-| Conversación IA | Ollama (Gemma3 1B) | ✅ ~5-15 tok/s en Pi 5 |
-| Voz → Texto | Whisper tiny | ✅ Modelo local 75MB |
-| Texto → Voz | espeak-ng | ✅ Motor TTS local |
-| Memoria | SQLite | ✅ Archivo en NVMe |
-| Wikipedia | Kiwix (ZIM) | ✅ Pre-descargado |
-| Mapas | ProtoMaps | ✅ Pre-descargado |
-| RAG documentos | Qdrant + Ollama | ✅ Embeddings locales |
-| Control motores | RPi.GPIO | ✅ Hardware directo |
+| Chat | POST http://localhost:8403/chat?message=... | Conversación |
+| Voz | POST http://localhost:8403/voice-chat | Enviar audio WAV |
+| Memoria stats | GET http://localhost:8401/stats | Estado de la memoria |
+| Emociones | GET http://localhost:8401/emotions/current | Estado emocional |
+| Status | GET http://localhost:8403/status | Estado completo del brain |
+| Wikipedia | http://localhost:8500 | Wikipedia offline |
+| Qdrant | http://localhost:6333 | Base vectorial RAG |
+
+## Comandos útiles
+
+```bash
+# Arrancar
+sudo systemctl start jarvis
+
+# Parar
+sudo systemctl stop jarvis
+
+# Reiniciar
+sudo systemctl restart jarvis
+
+# Ver logs
+cd /opt/jarvis/extensions && docker compose logs -f jarvis-brain
+
+# Hablar con Jarvis
+curl -X POST "http://localhost:8403/chat?message=Hola"
+
+# Ver qué recuerda
+curl http://localhost:8401/context
+
+# Ver emociones
+curl http://localhost:8401/emotions/current
+```
+
+## Hardware
+
+| Componente | Modelo | Precio aprox. |
+|---|---|---|
+| Raspberry Pi 5 8GB | Oficial | ~75€ |
+| Pantalla táctil 7" | RPi Touch Display 2 | ~60€ |
+| NVMe SSD 128GB | Kingston/WD + Pimoroni Base | ~55€ |
+| Active Cooler | Oficial Pi 5 | ~5€ |
+| Fuente 27W | USB-C oficial | ~12€ |
+| MicroSD 32GB | Samsung/SanDisk | ~9€ |
+| Micrófono USB | Mini USB | ~12€ |
+| Altavoz | USB/3.5mm | ~10€ |
+| **Total** | | **~238€** |
 
 ## Roadmap
 
 - [x] Arquitectura y diseño
-- [x] Código de extensiones (memory, voice, brain, motors)
-- [x] Docker Compose dev + producción
-- [ ] **Fase 1** — Cerebro + Pantalla + Voz en Pi 5
+- [x] Brain v3 con modelo dual y clasificador de intención
+- [x] Sistema emocional automático
+- [x] Memoria persistente con hechos y resúmenes
+- [x] Multi-turno y chain-of-thought
+- [x] Instalador unificado interactivo
+- [ ] **Fase 1** — Despliegue en Raspberry Pi 5
 - [ ] **Fase 2** — Movimiento robótico
 - [ ] **Fase 3** — Cámara + Visión
-- [ ] **Fase 4** — Personalidad avanzada
 
 ## Créditos
 
-- [Project N.O.M.A.D.](https://github.com/Crosstalk-Solutions/project-nomad) (Apache 2.0) — Base del sistema
-- [Ollama](https://ollama.com/) — LLM local
+Jarvis incorpora tecnología de los siguientes proyectos open-source:
+
+- [Project N.O.M.A.D.](https://github.com/Crosstalk-Solutions/project-nomad) (Apache 2.0) — Inspiración y referencia de arquitectura
+- [Ollama](https://ollama.com/) — Inferencia LLM local
 - [Whisper](https://github.com/openai/whisper) — Speech-to-text
-- [Qdrant](https://qdrant.tech/) — Vector database
+- [Qdrant](https://qdrant.tech/) — Base de datos vectorial
 - [Kiwix](https://kiwix.org/) — Contenido offline
+- [Gemma](https://ai.google.dev/gemma) — Modelo de conversación
+- [Qwen](https://github.com/QwenLM/Qwen2.5) — Modelo de razonamiento
 
 ## Licencia
 
-Apache License 2.0 — Basado en Project N.O.M.A.D. de Crosstalk Solutions
+Apache License 2.0
