@@ -1,7 +1,7 @@
 {
   "name": "jarvis",
   "version": "1.29.1",
-  "description": "\"",
+  "description": "Project J.A.R.V.I.S root metadata package",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"

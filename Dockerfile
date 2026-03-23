@@ -1,6 +1,6 @@
 FROM node:22-slim AS base
 
-# Install bash & curl for entrypoint script compatibility, graphicsmagick for pdf2pic, and vips-dev & build-base for sharp 
+# Install runtime/build deps used by the admin image build.
 RUN apt-get update && apt-get install -y bash curl graphicsmagick libvips-dev build-essential
 
 # All deps stage
