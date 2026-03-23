@@ -29,14 +29,14 @@ ARG BUILD_DATE
 ARG VCS_REF
 
 # Labels
-LABEL org.opencontainers.image.title="Project N.O.M.A.D" \
-      org.opencontainers.image.description="The Project N.O.M.A.D Official Docker image" \
+LABEL org.opencontainers.image.title="Project J.A.R.V.I.S" \
+      org.opencontainers.image.description="The Project J.A.R.V.I.S official Docker image" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.revision="${VCS_REF}" \
-      org.opencontainers.image.vendor="Crosstalk Solutions, LLC" \
-      org.opencontainers.image.documentation="https://github.com/CrosstalkSolutions/project-nomad/blob/main/README.md" \
-      org.opencontainers.image.source="https://github.com/CrosstalkSolutions/project-nomad" \
+      org.opencontainers.image.vendor="Ambidiosidad" \
+      org.opencontainers.image.documentation="https://github.com/Ambidiosidad/jarvis/blob/main/README.md" \
+      org.opencontainers.image.source="https://github.com/Ambidiosidad/jarvis" \
       org.opencontainers.image.licenses="Apache-2.0"
 
 ENV NODE_ENV=production

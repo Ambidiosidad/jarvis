@@ -1,11 +1,11 @@
 {
-  "name": "project-nomad",
+  "name": "jarvis",
   "version": "1.29.1",
   "description": "\"",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "author": "Crosstalk Solutions, LLC",
+  "author": "Ambidiosidad",
   "license": "ISC"
 }
