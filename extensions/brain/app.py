@@ -134,12 +134,13 @@ async def _get_memory_context() -> str:
     return ""
 
 
-async def _get_recent_messages() -> list[dict]:
+async def _get_recent_messages(limit: int | None = None) -> list[dict]:
+    max_messages = limit if isinstance(limit, int) and limit > 0 else CONTEXT_WINDOW
     try:
         async with httpx.AsyncClient(timeout=6) as client:
             res = await client.get(
                 f"{MEMORY}/messages/recent",
-                params={"limit": CONTEXT_WINDOW},
+                params={"limit": max_messages},
             )
             if res.status_code == 200:
                 return res.json().get("messages", [])
@@ -258,11 +259,87 @@ _VISION_HINTS = re.compile(
     re.IGNORECASE,
 )
 
+_NAME_QUERY_HINTS = re.compile(
+    r"\b("
+    r"como me llamo|cual es mi nombre|mi nombre|te acuerdas de mi nombre|"
+    r"recuerdas mi nombre|what is my name|do you remember my name"
+    r")\b",
+    re.IGNORECASE,
+)
+
 
 def _should_use_vision(message: str, force: bool = False) -> bool:
     if force:
         return True
     return bool(_VISION_HINTS.search(message or ""))
+
+
+def _is_name_query(message: str) -> bool:
+    return bool(_NAME_QUERY_HINTS.search(_to_ascii(message)))
+
+
+def _normalize_name(name: str) -> str:
+    value = re.sub(r"[^A-Za-z0-9_-]", "", (name or "").strip())
+    if not value:
+        return ""
+    return value[:1].upper() + value[1:]
+
+
+def _extract_name_from_memory(memory_context: str) -> str | None:
+    context = _to_ascii(memory_context or "")
+    patterns = [
+        r"(?:el usuario se llama|usuario se llama)\s+([A-Za-z][A-Za-z0-9_-]{1,40})",
+        r"(?:the user is called|user is called)\s+([A-Za-z][A-Za-z0-9_-]{1,40})",
+        r"(?:me llamo|mi nombre es)\s+([A-Za-z][A-Za-z0-9_-]{1,40})",
+        r"(?:my name is)\s+([A-Za-z][A-Za-z0-9_-]{1,40})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, context, re.IGNORECASE)
+        if match:
+            name = _normalize_name(match.group(1))
+            if name:
+                return name
+
+    return None
+
+
+def _extract_name_from_messages(messages: list[dict]) -> str | None:
+    for msg in reversed(messages or []):
+        if msg.get("role") != "user":
+            continue
+        text = _to_ascii(str(msg.get("content", "")))
+        match = re.search(
+            r"(?:me llamo|mi nombre es|my name is)\s+([A-Za-z][A-Za-z0-9_-]{1,40})",
+            text,
+            re.IGNORECASE,
+        )
+        if match:
+            name = _normalize_name(match.group(1))
+            if name:
+                return name
+    return None
+
+
+def _name_response(name: str, message: str) -> str:
+    text = _to_ascii(message).lower()
+    if "what is my name" in text or "remember my name" in text:
+        return f"Your name is {name}. I remember it."
+    return f"Te llamas {name}. Lo recuerdo."
+
+
+def _vision_unavailable_response(message: str, language: str = "es") -> str:
+    text = _to_ascii(message).lower()
+    if not str(language).lower().startswith("es"):
+        return (
+            "I cannot access your live webcam feed in this Docker-on-Windows setup. "
+            "I can still analyze images if you upload one to /analyze-image."
+        )
+    if "camera" in text or "camara" in text or "verme" in text or "puedes" in text:
+        return (
+            "No puedo acceder al streaming en vivo de tu webcam en este entorno Docker de Windows. "
+            "Si quieres, puedo analizar una imagen que subas al endpoint /analyze-image."
+        )
+    return "No tengo acceso en vivo a tu webcam ahora mismo. Puedo analizar una imagen subida en /analyze-image."
 
 
 def _vision_unavailable(reason: str) -> dict:
@@ -430,8 +507,14 @@ async def _exec_tools(tool_calls: list[dict]) -> None:
 
 
 _FACT_PATTERNS = [
-    (r"(?:me llamo|mi nombre es)\s+([A-Z]\w+)", "El usuario se llama {}"),
-    (r"(?:vivo en|soy de)\s+([A-Z]\w+(?:\s+\w+)?)", "El usuario vive en {}"),
+    (
+        r"(?:me llamo|mi nombre es)\s+([A-Za-z][A-Za-z0-9_-]{1,40})",
+        "El usuario se llama {}",
+    ),
+    (
+        r"(?:vivo en|soy de)\s+([A-Za-z][A-Za-z0-9_-]*(?:\s+[A-Za-z0-9_-]+)?)",
+        "El usuario vive en {}",
+    ),
     (
         r"(?:trabajo en|trabajo como)\s+(.+?)(?:\.|,|$)",
         "El usuario trabaja en/como {}",
@@ -441,8 +524,14 @@ _FACT_PATTERNS = [
         r"(?:me gusta|me encanta|me apasiona)\s+(.+?)(?:\.|,|y\s|$)",
         "Al usuario le gusta {}",
     ),
-    (r"(?:my name is)\s+(\w+)", "El usuario se llama {}"),
-    (r"(?:i live in)\s+(\w+(?:\s+\w+)?)", "El usuario vive en {}"),
+    (
+        r"(?:my name is)\s+([A-Za-z][A-Za-z0-9_-]{1,40})",
+        "El usuario se llama {}",
+    ),
+    (
+        r"(?:i live in)\s+([A-Za-z][A-Za-z0-9_-]*(?:\s+[A-Za-z0-9_-]+)?)",
+        "El usuario vive en {}",
+    ),
 ]
 
 
@@ -453,6 +542,8 @@ async def _auto_extract_facts(user_msg: str) -> None:
         if not match:
             continue
         value = match.group(1).strip()
+        if "se llama" in template:
+            value = _normalize_name(value)
         if len(value) > 2:
             await _save_fact(template.format(value))
 
@@ -528,6 +619,7 @@ async def _think(
     memory_context = await _get_memory_context()
 
     force_vision = use_vision or bool((session_state or {}).get("auto_vision", False))
+    wants_vision = _should_use_vision(user_msg, force=force_vision)
     vision_data = await _get_live_vision(user_msg, force=force_vision)
     vision_context = ""
     if vision_data:
@@ -550,23 +642,41 @@ async def _think(
                 "- Ask the user to provide an image or enable camera access."
             )
 
-    system = build_system_prompt(
-        intent,
-        memory_context + vision_context,
-        emotion_text,
-    )
-    system = f"{system}\n\n{tools_prompt()}"
+    known_name = _extract_name_from_memory(memory_context)
+    session_language = (session_state or {}).get("language", "es")
+    history: list[dict] = []
 
-    history = await _get_recent_messages()
+    if _is_name_query(user_msg) and not known_name:
+        history = await _get_recent_messages(limit=max(20, CONTEXT_WINDOW))
+        known_name = _extract_name_from_messages(history)
+        if known_name:
+            await _save_fact(f"El usuario se llama {known_name}")
 
     active_model = MODEL_REASONING if intent in ("logic", "factual") else MODEL
-    try:
-        raw = await _call_llm_chat(user_msg, system, history, model=active_model)
-    except Exception:
-        raw = (
-            "I could not reach the local language model right now. "
-            "Please verify that Ollama is running and models are installed."
+    if _is_name_query(user_msg) and known_name:
+        raw = _name_response(known_name, user_msg)
+    elif wants_vision and vision_data and not vision_data.get("available", True):
+        raw = _vision_unavailable_response(user_msg, session_language)
+    else:
+        system = build_system_prompt(
+            intent,
+            memory_context + vision_context,
+            emotion_text,
         )
+        if str(session_language).lower().startswith("es"):
+            system += "\n\nINSTRUCCION: Responde en espanol salvo que el usuario pida otro idioma."
+        system = f"{system}\n\n{tools_prompt()}"
+
+        if not history:
+            history = await _get_recent_messages()
+
+        try:
+            raw = await _call_llm_chat(user_msg, system, history, model=active_model)
+        except Exception:
+            raw = (
+                "I could not reach the local language model right now. "
+                "Please verify that Ollama is running and models are installed."
+            )
 
     await _save_msg("assistant", raw)
 
