@@ -67,6 +67,13 @@ cd C:\Users\jsimo\proyectos\jarvis\extensions
 docker compose -f docker-compose.dev.yml up -d --build
 ```
 
+Automatic start + continuous conversation:
+
+```powershell
+cd C:\Users\jsimo\proyectos\jarvis
+powershell -ExecutionPolicy Bypass -File .\scripts\jarvis\start_dev_converse.ps1 -SessionId jorge
+```
+
 ### Linux/macOS
 
 ```bash
@@ -173,6 +180,7 @@ jarvis/
 |   |-- smoke_test.sh
 |   |-- chat_loop.sh
 |   |-- converse_loop.sh
+|   |-- start_dev_converse.ps1
 |   |-- start.sh
 |   |-- stop.sh
 |   `-- uninstall.sh
