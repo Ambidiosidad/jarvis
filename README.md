@@ -63,14 +63,14 @@ docker exec jarvis_ollama ollama pull qwen2.5:3b
 ### Windows (PowerShell + Docker Desktop)
 
 ```powershell
-cd C:\Users\jsimo\proyectos\jarvis\extensions
+cd C:\Users\your\projects\folder\jarvis\extensions
 docker compose -f docker-compose.dev.yml up -d --build
 ```
 
 Automatic start + continuous conversation:
 
 ```powershell
-cd C:\Users\jsimo\proyectos\jarvis
+cd C:\Users\your\projects\folder\jarvis
 powershell -ExecutionPolicy Bypass -File .\scripts\jarvis\start_dev_converse.ps1 -SessionId jorge
 ```
 
