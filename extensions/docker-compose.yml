@@ -1,14 +1,11 @@
-# ═══════════════════════════════════════════════════════
-#  J.A.R.V.I.S. — Docker Compose Producción (Raspberry Pi 5)
-#  Stack completo autocontenido. No depende de N.O.M.A.D.
-# ═══════════════════════════════════════════════════════
+﻿# J.A.R.V.I.S. - Production stack (Raspberry Pi)
+# Self-contained services for offline operation.
 
 networks:
   jarvis_net:
     driver: bridge
 
 services:
-  # ─── INFRAESTRUCTURA ───
   jarvis-ollama:
     image: ollama/ollama:latest
     container_name: jarvis_ollama
@@ -37,7 +34,6 @@ services:
     networks:
       - jarvis_net
 
-  # ─── MEMORIA PERSISTENTE ───
   jarvis-memory:
     build: ./memory
     container_name: jarvis-memory
@@ -54,7 +50,6 @@ services:
       timeout: 5s
       retries: 3
 
-  # ─── VOZ: STT + TTS ───
   jarvis-voice:
     build: ./voice
     container_name: jarvis-voice
@@ -74,7 +69,26 @@ services:
       timeout: 10s
       retries: 3
 
-  # ─── CEREBRO / ORQUESTADOR ───
+  jarvis-vision:
+    build: ./vision
+    container_name: jarvis-vision
+    restart: unless-stopped
+    ports:
+      - "8405:8405"
+    environment:
+      - VISION_CAMERA_INDEX=0
+    volumes:
+      - /data/jarvis/vision:/app/data
+    devices:
+      - /dev/video0:/dev/video0
+    networks:
+      - jarvis_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8405/health"]
+      interval: 30s
+      timeout: 8s
+      retries: 3
+
   jarvis-brain:
     build: ./brain
     container_name: jarvis-brain
@@ -86,6 +100,7 @@ services:
       - QDRANT_URL=http://jarvis_qdrant:6333
       - MEMORY_URL=http://jarvis-memory:8401
       - VOICE_URL=http://jarvis-voice:8402
+      - VISION_URL=http://jarvis-vision:8405
       - MOTORS_URL=http://jarvis-motors:8404
       - MODEL_NAME=gemma3:1b
       - MODEL_REASONING=qwen2.5:3b
@@ -95,10 +110,11 @@ services:
         condition: service_healthy
       jarvis-voice:
         condition: service_healthy
+      jarvis-vision:
+        condition: service_healthy
     networks:
       - jarvis_net
 
-  # ─── KIWIX (Wikipedia, medicina, Stack Exchange offline) ───
   jarvis-kiwix:
     image: ghcr.io/kiwix/kiwix-serve:3.8.2
     container_name: jarvis_kiwix
@@ -111,7 +127,6 @@ services:
     networks:
       - jarvis_net
 
-  # ─── MOTORES (Fase 2 — descomentar cuando tengas hardware) ───
   # jarvis-motors:
   #   build: ./motors
   #   container_name: jarvis-motors

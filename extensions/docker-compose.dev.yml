@@ -1,13 +1,7 @@
-# ═══════════════════════════════════════════════════════
-#  J.A.R.V.I.S. — Docker Compose DESARROLLO LOCAL
-#  Para testear en tu PC sin Raspberry Pi ni N.O.M.A.D.
-#
-#  Uso:
-#    cd extensions/
-#    docker compose -f docker-compose.dev.yml up -d --build
-#    docker exec jarvis_ollama ollama pull gemma3:1b
-#    curl -X POST "http://localhost:8403/chat?message=Hola Jarvis"
-# ═══════════════════════════════════════════════════════
+﻿# J.A.R.V.I.S. - Local development stack
+# Run from repository root:
+#   cd extensions
+#   docker compose -f docker-compose.dev.yml up -d --build
 
 services:
   ollama-dev:
@@ -46,6 +40,21 @@ services:
       timeout: 10s
       retries: 5
 
+  jarvis-vision:
+    build: ./vision
+    container_name: jarvis-vision
+    ports:
+      - "8405:8405"
+    environment:
+      - VISION_CAMERA_INDEX=0
+    volumes:
+      - vision_data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8405/health"]
+      interval: 10s
+      timeout: 8s
+      retries: 5
+
   jarvis-brain:
     build: ./brain
     container_name: jarvis-brain
@@ -55,8 +64,10 @@ services:
       - OLLAMA_URL=http://jarvis_ollama:11434
       - MEMORY_URL=http://jarvis-memory:8401
       - VOICE_URL=http://jarvis-voice:8402
+      - VISION_URL=http://jarvis-vision:8405
       - MOTORS_URL=http://jarvis-motors:8404
       - MODEL_NAME=gemma3:1b
+      - MODEL_REASONING=qwen2.5:3b
       - JARVIS_LANGUAGE=es
       - JARVIS_ASCII_ONLY=true
     depends_on:
@@ -64,8 +75,11 @@ services:
         condition: service_healthy
       jarvis-voice:
         condition: service_healthy
+      jarvis-vision:
+        condition: service_healthy
 
 volumes:
   ollama_data:
   memory_data:
   voice_data:
+  vision_data:

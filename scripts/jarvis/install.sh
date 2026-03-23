@@ -254,7 +254,7 @@ else
 fi
 
 # Crear estructura de directorios
-mkdir -p $DATA_DIR/{ollama,qdrant,memory,voice/models,voice/audio,zim}
+mkdir -p $DATA_DIR/{ollama,qdrant,memory,voice/models,voice/audio,vision,zim}
 
 # Mostrar espacio disponible
 if [ -d "/data" ]; then
@@ -370,6 +370,10 @@ fi
 
 if wait_for_service "http://localhost:8403/health" "Brain" 30; then
     ok "Brain activo"
+fi
+
+if wait_for_service "http://localhost:8405/health" "Vision" 30; then
+    ok "Vision activo"
 fi
 
 # ═══════════════════════════════════════════════════
@@ -591,6 +595,7 @@ echo "  Comandos:"
 echo "    Hablar:     curl -X POST 'http://localhost:8403/chat?message=Hola'"
 echo "    Memoria:    curl http://localhost:8401/stats"
 echo "    Emociones:  curl http://localhost:8401/emotions/current"
+echo "    Vision:     curl -X POST http://localhost:8405/analyze"
 echo "    Wikipedia:  http://localhost:8500"
 echo "    Reiniciar:  sudo systemctl restart jarvis"
 echo "    Parar:      sudo systemctl stop jarvis"

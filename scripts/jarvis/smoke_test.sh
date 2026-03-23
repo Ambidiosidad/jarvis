@@ -77,7 +77,7 @@ if ! dc version >/dev/null 2>&1; then
 fi
 ok "docker compose available"
 
-CORE_CONTAINERS="jarvis_ollama jarvis-memory jarvis-voice jarvis-brain"
+CORE_CONTAINERS="jarvis_ollama jarvis-memory jarvis-voice jarvis-vision jarvis-brain"
 for c in $CORE_CONTAINERS; do
     if docker ps --format '{{.Names}}' | grep -Fxq "$c"; then
         ok "container running: $c"
@@ -89,6 +89,7 @@ done
 wait_http "http://localhost:11434/api/tags" "Ollama API" 40
 wait_http "http://localhost:8401/health" "jarvis-memory" 30
 wait_http "http://localhost:8402/health" "jarvis-voice" 30
+wait_http "http://localhost:8405/health" "jarvis-vision" 30
 wait_http "http://localhost:8403/health" "jarvis-brain" 30
 
 CHAT_RESPONSE="$(curl -fsS -X POST --get --data-urlencode "message=Hola Jarvis" http://localhost:8403/chat 2>/dev/null || true)"
@@ -102,6 +103,13 @@ if docker exec jarvis_ollama ollama list >/dev/null 2>&1; then
     ok "ollama list works inside jarvis_ollama"
 else
     warn "ollama list failed inside jarvis_ollama"
+fi
+
+VISION_HEALTH="$(curl -fsS http://localhost:8405/health 2>/dev/null || true)"
+if echo "$VISION_HEALTH" | grep -q '"camera_available":false'; then
+    warn "jarvis-vision is up but no camera device is available"
+elif echo "$VISION_HEALTH" | grep -q '"camera_available":true'; then
+    ok "jarvis-vision camera device is available"
 fi
 
 echo ""

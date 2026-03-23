@@ -67,6 +67,7 @@ curl -X POST "http://localhost:8403/chat?message=Hello Jarvis"
 - **Offline-first architecture** for local execution after setup
 - **Persistent memory** across conversations
 - **Speech input and output**
+- **Live visual perception** (camera + scene analysis)
 - **Local retrieval-augmented generation (RAG)**
 - **Raspberry Pi focused deployment**
 - **REST API endpoints** for integration
@@ -88,6 +89,7 @@ curl -X POST "http://localhost:8403/chat?message=Hello Jarvis"
 | Power | Stable 5V/3A | Official 27W PSU | Prevents throttling/undervoltage under load |
 | Cooling | Passive cooling | Active cooler | Recommended for sustained LLM workloads |
 | Audio | Optional | USB mic + speaker/headset | Required for voice interaction |
+| Camera | Optional | Pi Camera or USB webcam | Required for visual perception features |
 | Internet | Required only for setup | Required only for setup | Runtime can be fully offline |
 
 ### Desktop / VM testing target
@@ -116,6 +118,7 @@ Core services:
 - `jarvis-brain` (orchestrator, tool-use, model routing)
 - `jarvis-memory` (messages, facts, summaries, emotion state)
 - `jarvis-voice` (speech-to-text + text-to-speech)
+- `jarvis-vision` (camera capture + lightweight visual analysis)
 - `jarvis_ollama` (local LLM runtime)
 - `jarvis_qdrant` (vector database for RAG)
 - `jarvis_kiwix` (offline knowledge serving, optional content)
@@ -133,6 +136,7 @@ jarvis/
 |   |-- brain/
 |   |-- memory/
 |   |-- voice/
+|   |-- vision/
 |   `-- motors/
 |-- scripts/jarvis/
 |   |-- install.sh
@@ -151,7 +155,11 @@ jarvis/
 ## Useful Endpoints
 
 - `POST http://localhost:8403/chat?message=...`
+- `POST http://localhost:8403/chat?message=...&use_vision=true`
+- `POST http://localhost:8403/vision-chat?message=...`
 - `POST http://localhost:8403/voice-chat`
+- `GET  http://localhost:8405/health`
+- `POST http://localhost:8405/analyze`
 - `GET  http://localhost:8401/stats`
 - `GET  http://localhost:8401/context`
 - `GET  http://localhost:8401/emotions/current`
@@ -177,6 +185,9 @@ sudo bash /opt/jarvis/scripts/jarvis/smoke_test.sh
 
 # Interactive terminal chat
 sudo bash /opt/jarvis/scripts/jarvis/chat_loop.sh
+
+# One-shot vision check
+curl -X POST "http://localhost:8405/analyze"
 
 # One-shot chat
 curl -X POST "http://localhost:8403/chat?message=Hello"

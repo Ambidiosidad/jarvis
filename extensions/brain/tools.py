@@ -1,41 +1,36 @@
-"""
-J.A.R.V.I.S. Tools v2
-========================
-Herramientas invocables por el LLM.
-Incluye movimiento, memoria, emociones y aprendizaje.
+﻿"""
+J.A.R.V.I.S. tools catalog used in prompts.
 """
 
 TOOLS = {
     "move": {
-        "desc": "Mover el robot",
-        "params": "direction: forward|backward|left|right|stop, duration: float, speed: 0-1"
+        "desc": "Move the robot",
+        "params": "direction: forward|backward|left|right|stop, duration: float, speed: 0-1",
     },
     "remember": {
-        "desc": "Guardar un hecho sobre el usuario en memoria permanente",
-        "params": "fact: texto del hecho"
-    },
-    "update_emotion": {
-        "desc": "Actualizar tu estado emocional actual",
-        "params": "mood: str, energy: 0-1, patience: 0-1, bond: 0-1, reason: str"
+        "desc": "Store a permanent user fact",
+        "params": "fact: text",
     },
     "learn_pattern": {
-        "desc": "Registrar un patrón observado sobre el usuario",
-        "params": "type: preference|habit|interest|communication_style, description: str"
+        "desc": "Store a learned user pattern",
+        "params": "type: preference|habit|interest|communication_style, description: str",
+    },
+    "observe_scene": {
+        "desc": "Trigger a visual scan using camera",
+        "params": "save_frame: bool (optional)",
     },
     "search_knowledge": {
-        "desc": "Buscar en documentos subidos (RAG vía Qdrant)",
-        "params": "query: texto de búsqueda"
-    },
-    "summarize_conversation": {
-        "desc": "Generar un resumen de la conversación actual para memoria a largo plazo",
-        "params": "summary: texto del resumen, topics: lista de temas"
+        "desc": "Search uploaded documents (RAG)",
+        "params": "query: text",
     },
 }
 
 
 def tools_prompt() -> str:
-    lines = ["\n## Herramientas disponibles",
-             'Incluye un JSON para invocar: {"tool": "nombre", "params": {...}}\n']
-    for name, t in TOOLS.items():
-        lines.append(f"- **{name}**: {t['desc']}  →  {{{t['params']}}}")
+    lines = [
+        "## Available tools",
+        'Use JSON to invoke: {"tool":"name","params":{...}}',
+    ]
+    for name, tool in TOOLS.items():
+        lines.append(f"- {name}: {tool['desc']} -> {{{tool['params']}}}")
     return "\n".join(lines)

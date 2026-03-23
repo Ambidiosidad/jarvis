@@ -4,9 +4,11 @@
 set -u
 
 BRAIN_URL="${JARVIS_BRAIN_URL:-http://localhost:8403}"
+USE_VISION="${JARVIS_USE_VISION:-false}"
 
 echo "JARVIS chat loop"
 echo "Endpoint: ${BRAIN_URL}/chat"
+echo "Vision mode: ${USE_VISION}"
 echo "Type your message and press Enter."
 echo "Type 'salir', 'exit', or 'quit' to finish."
 echo ""
@@ -27,6 +29,7 @@ while true; do
 
     raw="$(curl -fsS -X POST --get \
         --data-urlencode "message=${user_msg}" \
+        --data-urlencode "use_vision=${USE_VISION}" \
         "${BRAIN_URL}/chat" 2>/dev/null || true)"
 
     if [ -z "${raw}" ]; then
@@ -39,6 +42,7 @@ while true; do
         response="$(printf "%s" "${raw}" | jq -r '.response // empty')"
         intent="$(printf "%s" "${raw}" | jq -r '.intent // empty')"
         model="$(printf "%s" "${raw}" | jq -r '.model_used // empty')"
+        vision_summary="$(printf "%s" "${raw}" | jq -r '.vision.summary // empty')"
 
         if [ -n "${response}" ]; then
             echo "Jarvis: ${response}"
@@ -48,6 +52,9 @@ while true; do
 
         if [ -n "${intent}" ] || [ -n "${model}" ]; then
             echo "        [intent=${intent:-n/a} model=${model:-n/a}]"
+        fi
+        if [ -n "${vision_summary}" ]; then
+            echo "        [vision=${vision_summary}]"
         fi
     else
         # Fallback without jq: print raw JSON.
