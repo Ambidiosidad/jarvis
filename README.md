@@ -66,6 +66,30 @@ It is designed as a local assistant system for Raspberry Pi, with a focus on:
 The goal is to provide a foundation for a private, hackable, real-world AI assistant rather than a simple demo project.
 
 ---
+
+## Installation
+
+### Public repo
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Ambidiosidad/jarvis/main/scripts/jarvis/install.sh | sudo bash
+```
+
+The installer configures storage, Docker, services, models, and optional offline content.
+
+---
+
+## Local Development (Desktop)
+
+```bash
+git clone https://github.com/Ambidiosidad/jarvis.git
+cd jarvis/extensions
+docker compose -f docker-compose.dev.yml up -d --build
+docker exec jarvis_ollama ollama pull gemma3:1b
+docker exec jarvis_ollama ollama pull qwen2.5:3b
+```
+
+---
 ## System Requirements
 
 ### Production target (Raspberry Pi)
@@ -97,46 +121,6 @@ The goal is to provide a foundation for a private, hackable, real-world AI assis
 |---|---|---|---|
 | Fast chat only (`gemma3:1b`) | 4 GB | 8 GB | Best for low-latency conversational flow |
 | Dual model (`gemma3:1b` + `qwen2.5:3b`) | 8 GB | 8 GB + swap on SSD/NVMe | Ollama loads one model at a time, but swaps between them |
-
----
-
-## Raspberry Pi Installation
-
-### Public repo mode
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Ambidiosidad/jarvis/main/scripts/jarvis/install.sh | sudo bash
-```
-
-### Private repo mode
-
-```bash
-sudo apt-get update && sudo apt-get install -y git curl
-git clone git@github.com:Ambidiosidad/jarvis.git /opt/jarvis
-# or HTTPS + PAT:
-# git clone https://github.com/Ambidiosidad/jarvis.git /opt/jarvis
-sudo bash /opt/jarvis/scripts/jarvis/install.sh
-```
-
-The installer configures storage, Docker, services, models, and optional offline content.
-
----
-
-## Local Development (Desktop)
-
-```bash
-git clone https://github.com/Ambidiosidad/jarvis.git
-cd jarvis/extensions
-docker compose -f docker-compose.dev.yml up -d --build
-docker exec jarvis_ollama ollama pull gemma3:1b
-docker exec jarvis_ollama ollama pull qwen2.5:3b
-```
-
-Quick test:
-
-```bash
-curl -X POST "http://localhost:8403/chat?message=Hello Jarvis"
-```
 
 ---
 
