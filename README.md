@@ -196,8 +196,6 @@ curl -X POST "http://localhost:8403/chat?message=Hello"
 - [x] Brain v3 with intent routing
 - [x] Memory + emotional state
 - [x] Unified installer
-- [x] Local VM validation flow
-- [ ] Raspberry Pi production deployment
 - [ ] Motor/chassis integration
 - [ ] Camera + multimodal phase
 
