@@ -256,23 +256,31 @@ async def _call_llm_chat(
 
     messages.append({"role": "user", "content": user_msg})
 
-    async with httpx.AsyncClient(timeout=120) as client:
-        res = await client.post(
-            f"{OLLAMA}/api/chat",
-            json={
-                "model": model or MODEL,
-                "messages": messages,
-                "stream": False,
-                "options": {
-                    "temperature": 0.7,
-                    "num_ctx": 4096,
-                    "num_predict": max_tokens,
-                },
-            },
-        )
-        res.raise_for_status()
+    payload = {
+        "model": model or MODEL,
+        "messages": messages,
+        "stream": False,
+        "options": {
+            "temperature": 0.7,
+            "num_ctx": 4096,
+            "num_predict": max_tokens,
+        },
+    }
 
-    return res.json().get("message", {}).get("content", "").strip()
+    async with httpx.AsyncClient(timeout=120) as client:
+        try:
+            res = await client.post(f"{OLLAMA}/api/chat", json=payload)
+            res.raise_for_status()
+            return res.json().get("message", {}).get("content", "").strip()
+        except Exception:
+            # Fallback to primary model if reasoning model is unavailable.
+            selected = model or MODEL
+            if selected != MODEL:
+                payload["model"] = MODEL
+                res_fallback = await client.post(f"{OLLAMA}/api/chat", json=payload)
+                res_fallback.raise_for_status()
+                return res_fallback.json().get("message", {}).get("content", "").strip()
+            raise
 
 
 async def _call_llm_simple(prompt: str, system: str, max_tokens: int = 150) -> str:
@@ -474,7 +482,13 @@ async def _think(user_msg: str, use_vision: bool = False) -> dict:
     history = await _get_recent_messages()
 
     active_model = MODEL_REASONING if intent in ("logic", "factual") else MODEL
-    raw = await _call_llm_chat(user_msg, system, history, model=active_model)
+    try:
+        raw = await _call_llm_chat(user_msg, system, history, model=active_model)
+    except Exception:
+        raw = (
+            "I could not reach the local language model right now. "
+            "Please verify that Ollama is running and models are installed."
+        )
 
     await _save_msg("assistant", raw)
 
