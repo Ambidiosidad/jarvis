@@ -215,6 +215,19 @@ def _should_use_vision(message: str, force: bool = False) -> bool:
     return bool(_VISION_HINTS.search(message or ""))
 
 
+def _vision_unavailable(reason: str) -> dict:
+    return {
+        "available": False,
+        "error": reason,
+        "summary": "Live camera data is unavailable.",
+        "labels": ["vision_unavailable"],
+        "people_count": 0,
+        "glasses_detected": False,
+        "mood_estimate": "unknown",
+        "mood_confidence": 0.0,
+    }
+
+
 async def _get_live_vision(message: str, force: bool = False) -> dict | None:
     if not _should_use_vision(message, force):
         return None
@@ -223,13 +236,14 @@ async def _get_live_vision(message: str, force: bool = False) -> dict | None:
         async with httpx.AsyncClient(timeout=12) as client:
             res = await client.post(f"{VISION}/analyze")
             if res.status_code != 200:
-                return None
+                return _vision_unavailable(f"vision_http_{res.status_code}") if force else None
             data = res.json()
 
+        data["available"] = True
         await _save_observation(data)
         return data
     except Exception:
-        return None
+        return _vision_unavailable("vision_unreachable") if force else None
 
 
 # ---------------------------------------------------------------------------
@@ -461,16 +475,24 @@ async def _think(user_msg: str, use_vision: bool = False) -> dict:
     vision_data = await _get_live_vision(user_msg, force=use_vision)
     vision_context = ""
     if vision_data:
-        labels = ", ".join(vision_data.get("labels", []))
-        summary = vision_data.get("summary", "")
-        vision_context = (
-            "\n\n## Live visual context\n"
-            f"- {summary}\n"
-            f"- labels: {labels}\n"
-            f"- people_count: {vision_data.get('people_count', 0)}\n"
-            f"- glasses_detected: {vision_data.get('glasses_detected', False)}\n"
-            f"- mood_estimate: {vision_data.get('mood_estimate', 'unknown')}"
-        )
+        if vision_data.get("available", True):
+            labels = ", ".join(vision_data.get("labels", []))
+            summary = vision_data.get("summary", "")
+            vision_context = (
+                "\n\n## Live visual context\n"
+                f"- {summary}\n"
+                f"- labels: {labels}\n"
+                f"- people_count: {vision_data.get('people_count', 0)}\n"
+                f"- glasses_detected: {vision_data.get('glasses_detected', False)}\n"
+                f"- mood_estimate: {vision_data.get('mood_estimate', 'unknown')}"
+            )
+        else:
+            vision_context = (
+                "\n\n## Live visual context\n"
+                "- Live camera data is unavailable right now.\n"
+                "- Do not claim that you can currently see the scene.\n"
+                "- Ask the user to provide an image or enable camera access."
+            )
 
     system = build_system_prompt(
         intent,
