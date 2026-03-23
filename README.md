@@ -128,6 +128,7 @@ jarvis/
 ├── scripts/jarvis/
 │   ├── install.sh               ←   Instalador unificado
 │   ├── smoke_test.sh            ←   Validación post-instalación
+│   ├── chat_loop.sh             ←   Chat interactivo en terminal
 │   ├── start.sh                 ←   Arranque
 │   ├── stop.sh                  ←   Parada
 │   └── uninstall.sh             ←   Desinstalación
@@ -166,6 +167,9 @@ cd /opt/jarvis/extensions && docker compose logs -f jarvis-brain
 
 # Smoke test completo (health + chat)
 sudo bash /opt/jarvis/scripts/jarvis/smoke_test.sh
+
+# Conversacion interactiva en terminal
+sudo bash /opt/jarvis/scripts/jarvis/chat_loop.sh
 
 # Hablar con Jarvis
 curl -X POST "http://localhost:8403/chat?message=Hola"
