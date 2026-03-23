@@ -37,6 +37,26 @@ curl -fsSL https://raw.githubusercontent.com/Ambidiosidad/jarvis/main/scripts/ja
 
 The installer configures storage, Docker, services, models, and optional offline content.
 
+## Local Development (Desktop)
+
+### Windows (PowerShell + Docker Desktop)
+
+```powershell
+cd C:\Users\jsimo\proyectos\jarvis\extensions
+docker compose -f docker-compose.dev.yml up -d --build
+```
+
+### Linux/macOS
+
+```bash
+git clone https://github.com/Ambidiosidad/jarvis.git
+cd jarvis/extensions
+docker compose -f docker-compose.dev.yml up -d --build
+docker exec jarvis_ollama ollama pull gemma3:1b
+docker exec jarvis_ollama ollama pull qwen2.5:3b
+```
+
+
 
 ## Local Development (Desktop)
 
