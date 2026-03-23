@@ -88,24 +88,30 @@ def _apply_semantic_controls(message: str, state: dict) -> dict:
     text = _to_ascii(message).lower()
     controls: dict[str, object] = {}
 
-    if re.search(r"\b(no hables|modo silencio|mute|silencio)\b", text):
+    if re.search(r"\b(no hables|modo silencio|mute|silencio|dont speak|be quiet)\b", text):
         state["speaker_enabled"] = False
         controls["speaker_enabled"] = False
-    elif re.search(r"\b(habla|desmute|quita silencio|vuelve a hablar)\b", text):
+    elif re.search(r"\b(habla|desmute|quita silencio|vuelve a hablar|speak|unmute)\b", text):
         state["speaker_enabled"] = True
         controls["speaker_enabled"] = True
 
-    if re.search(r"\b(desactiva micro|no escuches|mute mic)\b", text):
+    if re.search(r"\b(desactiva micro|no escuches|mute mic|disable mic|dont listen)\b", text):
         state["mic_enabled"] = False
         controls["mic_enabled"] = False
-    elif re.search(r"\b(activa micro|escuchame|unmute mic)\b", text):
+    elif re.search(r"\b(activa micro|escuchame|unmute mic|enable mic|listen to me)\b", text):
         state["mic_enabled"] = True
         controls["mic_enabled"] = True
 
-    if re.search(r"\b(activa camara|modo vision|mira siempre)\b", text):
+    if re.search(
+        r"\b(activa camara|modo vision|mira siempre|enable camera|camera mode|always look)\b",
+        text,
+    ):
         state["auto_vision"] = True
         controls["auto_vision"] = True
-    elif re.search(r"\b(desactiva camara|sin vision|no mires)\b", text):
+    elif re.search(
+        r"\b(desactiva camara|sin vision|no mires|disable camera|no vision|dont look)\b",
+        text,
+    ):
         state["auto_vision"] = False
         controls["auto_vision"] = False
 
@@ -273,21 +279,22 @@ def _vision_unavailable(reason: str) -> dict:
 
 
 async def _get_live_vision(message: str, force: bool = False) -> dict | None:
-    if not _should_use_vision(message, force):
+    wants_vision = _should_use_vision(message, force)
+    if not wants_vision:
         return None
 
     try:
         async with httpx.AsyncClient(timeout=12) as client:
             res = await client.post(f"{VISION}/analyze")
             if res.status_code != 200:
-                return _vision_unavailable(f"vision_http_{res.status_code}") if force else None
+                return _vision_unavailable(f"vision_http_{res.status_code}")
             data = res.json()
 
         data["available"] = True
         await _save_observation(data)
         return data
     except Exception:
-        return _vision_unavailable("vision_unreachable") if force else None
+        return _vision_unavailable("vision_unreachable")
 
 
 # ---------------------------------------------------------------------------
