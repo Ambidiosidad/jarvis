@@ -42,7 +42,7 @@ The installer configures storage, Docker, services, models, and optional offline
 ### Windows (PowerShell + Docker Desktop)
 
 ```powershell
-cd C:\Users\jsimo\proyectos\jarvis\extensions
+cd C:\Users\your\projects\folder
 docker compose -f docker-compose.dev.yml up -d --build
 ```
 
