@@ -74,6 +74,9 @@ cd C:\Users\jsimo\proyectos\jarvis
 powershell -ExecutionPolicy Bypass -File .\scripts\jarvis\start_dev_converse.ps1 -SessionId jorge
 ```
 
+`start_dev_converse.ps1` auto-updates from `origin/main` when the repo is clean.
+Use `-NoAutoUpdate` to skip git sync.
+
 ### Linux/macOS
 
 ```bash

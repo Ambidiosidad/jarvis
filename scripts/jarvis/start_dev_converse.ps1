@@ -3,6 +3,7 @@
     [switch]$UseVision,
     [switch]$NoBuild,
     [switch]$SkipModelPull,
+    [switch]$NoAutoUpdate,
     [string]$ComposeFile = "docker-compose.dev.yml"
 )
 
@@ -38,6 +39,31 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
 }
 
 try {
+    if (-not $NoAutoUpdate) {
+        if (Get-Command git -ErrorAction SilentlyContinue) {
+            Write-Host "[0/4] Syncing repository..." -ForegroundColor Cyan
+            $dirty = (& git -C "$repoRoot" status --porcelain 2>$null)
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "[WARN] Could not check git status. Continuing with local code." -ForegroundColor Yellow
+            }
+            elseif (-not [string]::IsNullOrWhiteSpace(($dirty -join ""))) {
+                Write-Host "[WARN] Local changes detected. Auto-update skipped to avoid conflicts." -ForegroundColor Yellow
+            }
+            else {
+                & git -C "$repoRoot" pull --rebase origin main | Out-Host
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host "[OK] Repository updated from origin/main" -ForegroundColor Green
+                }
+                else {
+                    Write-Host "[WARN] Auto-update failed. Continuing with local copy." -ForegroundColor Yellow
+                }
+            }
+        }
+        else {
+            Write-Host "[WARN] git not found. Auto-update skipped." -ForegroundColor Yellow
+        }
+    }
+
     docker info > $null 2>&1
     if ($LASTEXITCODE -ne 0) {
         throw "Docker daemon is not reachable. Start Docker Desktop and retry."
@@ -50,25 +76,26 @@ try {
         $upArgs += "--build"
     }
 
-    Write-Host "[1/3] Starting JARVIS stack..." -ForegroundColor Cyan
+    Write-Host "[1/4] Starting JARVIS stack..." -ForegroundColor Cyan
     & docker @upArgs
     if ($LASTEXITCODE -ne 0) {
         throw "docker compose up failed"
     }
 
-    Write-Host "[2/3] Waiting for services..." -ForegroundColor Cyan
+    Write-Host "[2/4] Waiting for services..." -ForegroundColor Cyan
     Wait-Health -Url "http://localhost:8401/health" -Label "jarvis-memory"
     Wait-Health -Url "http://localhost:8402/health" -Label "jarvis-voice"
     Wait-Health -Url "http://localhost:8403/health" -Label "jarvis-brain"
     Wait-Health -Url "http://localhost:8405/health" -Label "jarvis-vision"
 
     if (-not $SkipModelPull) {
-        Write-Host "[3/3] Ensuring base model is available..." -ForegroundColor Cyan
+        Write-Host "[3/4] Ensuring base model is available..." -ForegroundColor Cyan
         & docker exec jarvis_ollama ollama pull gemma3:1b | Out-Host
     }
 
     $visionFlag = if ($UseVision) { "true" } else { "false" }
 
+    Write-Host "[4/4] Entering continuous conversation mode..." -ForegroundColor Cyan
     Write-Host ""
     Write-Host "JARVIS conversation mode is live." -ForegroundColor Green
     Write-Host "Session: $SessionId"
