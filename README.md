@@ -32,7 +32,7 @@ After installation, you can send a message to JARVIS with:
 
 ```bash
 curl -X POST "http://localhost:8403/chat?message=Hello Jarvis"
-
+```
 ---
 
 ## Features
