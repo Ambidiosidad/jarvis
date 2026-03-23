@@ -1,34 +1,71 @@
 ﻿# Project J.A.R.V.I.S.
 
-## Just A Rather Very Intelligent System
+## Offline AI Voice Assistant for Raspberry Pi
 
-JARVIS is a fully offline AI assistant designed to run on a Raspberry Pi 5 with:
+JARVIS is an offline-first AI assistant built for Raspberry Pi and other Docker-capable devices.
+It supports speech input and output, persistent memory across sessions, local knowledge retrieval, and optional robotics integration.
 
-- Persistent memory across sessions
-- Voice input/output (STT + TTS)
-- Emotion-aware responses
-- Optional robotics control (motors, phase 2)
-- Optional offline knowledge stack (Wikipedia, medical, education, maps)
+## Why JARVIS
 
-The goal is simple: once installed, JARVIS can operate without internet.
+Most AI assistants depend on the cloud, lose context between sessions, or are hard to adapt to embedded hardware.
+
+JARVIS is designed to be different:
+
+- **Offline-first after setup** — runs locally on your Raspberry Pi
+- **Persistent memory** — remembers past interactions across sessions
+- **Speech-enabled** — voice input and text-to-speech support
+- **Local knowledge retrieval** — RAG support with local vector storage
+- **Hardware-friendly** — built with Raspberry Pi deployment in mind
+- **Extensible** — optional robotics and automation integrations
+
+## What you can do with it
+
+- Run a local AI assistant on a Raspberry Pi
+- Talk to it using voice or text
+- Keep memory between sessions
+- Query local knowledge sources
+- Use it as a base for home automation or robotics projects
+
+## Quick demo
+
+After installation, you can send a message to JARVIS with:
+
+```bash
+curl -X POST "http://localhost:8403/chat?message=Hello Jarvis"
 
 ---
 
 ## Features
 
-- 100% offline runtime after setup
-- Dual-model routing:
+- **100% offline runtime after setup**
+- **Dual-model routing**:
   - `gemma3:1b` for fast conversation
   - `qwen2.5:3b` for logic and reasoning
-- Long-term memory (facts, summaries, patterns)
-- Automatic emotional state updates
-- Voice stack with Whisper + espeak-ng
-- Local RAG with Qdrant + embeddings
-- One-command installer for Raspberry Pi
-- Local development stack for desktop testing
+- **Offline-first architecture** for local execution after setup
+- **Persistent memory** across conversations
+- **Speech input and output**
+- **Local retrieval-augmented generation (RAG)**
+- **Raspberry Pi focused deployment**
+- **REST API endpoints** for integration
+- **Extensible design** for automation and robotics
+- **Docker-based setup** for easier installation
 
 ---
+## What makes JARVIS different
 
+JARVIS is not just another chat interface around an LLM.
+
+It is designed as a local assistant system for Raspberry Pi, with a focus on:
+
+- voice interaction
+- memory persistence
+- on-device style deployment
+- modular architecture
+- extensibility for physical computing and robotics
+
+The goal is to provide a foundation for a private, hackable, real-world AI assistant rather than a simple demo project.
+
+---
 ## System Requirements
 
 ### Production target (Raspberry Pi)
