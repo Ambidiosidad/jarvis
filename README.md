@@ -97,6 +97,7 @@ curl -X POST "http://localhost:8403/chat?message=Hello Jarvis"
 - **Persistent memory** across conversations
 - **Speech input and output**
 - **Live visual perception** (camera + scene analysis)
+- **Continuous conversation mode** with semantic controls
 - **Local retrieval-augmented generation (RAG)**
 - **Raspberry Pi focused deployment**
 - **REST API endpoints** for integration
@@ -171,6 +172,7 @@ jarvis/
 |   |-- install.sh
 |   |-- smoke_test.sh
 |   |-- chat_loop.sh
+|   |-- converse_loop.sh
 |   |-- start.sh
 |   |-- stop.sh
 |   `-- uninstall.sh
@@ -185,6 +187,8 @@ jarvis/
 
 - `POST http://localhost:8403/chat?message=...`
 - `POST http://localhost:8403/chat?message=...&use_vision=true`
+- `POST http://localhost:8403/converse?message=...&session_id=default`
+- `POST http://localhost:8403/converse-audio` (multipart audio)
 - `POST http://localhost:8403/vision-chat?message=...`
 - `POST http://localhost:8403/voice-chat`
 - `GET  http://localhost:8405/health`
@@ -215,12 +219,30 @@ sudo bash /opt/jarvis/scripts/jarvis/smoke_test.sh
 # Interactive terminal chat
 sudo bash /opt/jarvis/scripts/jarvis/chat_loop.sh
 
+# Continuous conversation loop (semantic controls)
+sudo bash /opt/jarvis/scripts/jarvis/converse_loop.sh
+
 # One-shot vision check
 curl -X POST "http://localhost:8405/analyze"
 
 # One-shot chat
 curl -X POST "http://localhost:8403/chat?message=Hello"
 ```
+
+---
+
+## Natural Conversation Controls
+
+You can speak naturally without special commands. The `/converse` flow interprets these intents:
+
+- `modo silencio` / `no hables` -> disables speaker output for current session
+- `habla` / `vuelve a hablar` -> enables speaker output
+- `activa camara` / `modo vision` -> enables automatic visual analysis
+- `desactiva camara` / `sin vision` -> disables automatic visual analysis
+- `desactiva micro` / `no escuches` -> disables microphone input in `/converse-audio`
+- `activa micro` / `escuchame` -> enables microphone input again
+
+Use stable sessions with `session_id` in `/converse` to preserve this state.
 
 ---
 

@@ -11,6 +11,7 @@ import json
 import os
 import re
 import unicodedata
+from urllib.parse import quote
 
 import httpx
 from fastapi import FastAPI, File, UploadFile
@@ -49,6 +50,14 @@ CONTEXT_WINDOW = int(os.getenv("JARVIS_CONTEXT_MESSAGES", "6"))
 _message_count = 0
 _SUMMARIZE_EVERY = 10
 
+_SESSION_DEFAULT = {
+    "speaker_enabled": True,
+    "mic_enabled": True,
+    "auto_vision": False,
+    "language": os.getenv("JARVIS_LANGUAGE", "es"),
+}
+_SESSION_STATE: dict[str, dict] = {}
+
 
 def _to_ascii(text: str) -> str:
     normalized = unicodedata.normalize("NFKD", text or "")
@@ -66,6 +75,41 @@ def _sanitize_emotion(emotion: dict) -> dict:
     for key, value in (emotion or {}).items():
         safe[key] = _to_ascii(value) if isinstance(value, str) else value
     return safe
+
+
+def _get_session_state(session_id: str) -> dict:
+    sid = session_id.strip() if session_id else "default"
+    if sid not in _SESSION_STATE:
+        _SESSION_STATE[sid] = dict(_SESSION_DEFAULT)
+    return _SESSION_STATE[sid]
+
+
+def _apply_semantic_controls(message: str, state: dict) -> dict:
+    text = _to_ascii(message).lower()
+    controls: dict[str, object] = {}
+
+    if re.search(r"\b(no hables|modo silencio|mute|silencio)\b", text):
+        state["speaker_enabled"] = False
+        controls["speaker_enabled"] = False
+    elif re.search(r"\b(habla|desmute|quita silencio|vuelve a hablar)\b", text):
+        state["speaker_enabled"] = True
+        controls["speaker_enabled"] = True
+
+    if re.search(r"\b(desactiva micro|no escuches|mute mic)\b", text):
+        state["mic_enabled"] = False
+        controls["mic_enabled"] = False
+    elif re.search(r"\b(activa micro|escuchame|unmute mic)\b", text):
+        state["mic_enabled"] = True
+        controls["mic_enabled"] = True
+
+    if re.search(r"\b(activa camara|modo vision|mira siempre)\b", text):
+        state["auto_vision"] = True
+        controls["auto_vision"] = True
+    elif re.search(r"\b(desactiva camara|sin vision|no mires)\b", text):
+        state["auto_vision"] = False
+        controls["auto_vision"] = False
+
+    return controls
 
 
 # ---------------------------------------------------------------------------
@@ -454,7 +498,11 @@ async def _auto_summarize() -> None:
 # ---------------------------------------------------------------------------
 
 
-async def _think(user_msg: str, use_vision: bool = False) -> dict:
+async def _think(
+    user_msg: str,
+    use_vision: bool = False,
+    session_state: dict | None = None,
+) -> dict:
     global _message_count
 
     await _save_msg("user", user_msg)
@@ -472,7 +520,8 @@ async def _think(user_msg: str, use_vision: bool = False) -> dict:
 
     memory_context = await _get_memory_context()
 
-    vision_data = await _get_live_vision(user_msg, force=use_vision)
+    force_vision = use_vision or bool((session_state or {}).get("auto_vision", False))
+    vision_data = await _get_live_vision(user_msg, force=force_vision)
     vision_context = ""
     if vision_data:
         if vision_data.get("available", True):
@@ -540,10 +589,17 @@ async def _think(user_msg: str, use_vision: bool = False) -> dict:
 # ---------------------------------------------------------------------------
 
 
-@app.post("/chat")
-async def chat(message: str, use_vision: bool = False) -> dict:
-    result = await _think(message, use_vision=use_vision)
-    return {
+def _build_tts_url(text: str, language: str = "es") -> str:
+    return f"{VOICE}/tts?text={quote(text[:300])}&language={quote(language)}"
+
+
+def _build_response_payload(
+    result: dict,
+    session_id: str | None = None,
+    session_state: dict | None = None,
+    controls_applied: dict | None = None,
+) -> dict:
+    payload = {
         "response": _out(result["text"]),
         "tools_executed": result["tools"],
         "emotion": _sanitize_emotion(result["emotion"]),
@@ -551,19 +607,53 @@ async def chat(message: str, use_vision: bool = False) -> dict:
         "model_used": result["model_used"],
         "vision": result["vision"],
     }
+    if session_id is not None:
+        payload["session_id"] = session_id
+    if session_state is not None:
+        payload["session_state"] = session_state
+        if session_state.get("speaker_enabled", True):
+            payload["audio_url"] = _build_tts_url(
+                payload["response"],
+                session_state.get("language", "es"),
+            )
+        else:
+            payload["audio_url"] = None
+    if controls_applied is not None:
+        payload["controls_applied"] = controls_applied
+    return payload
+
+
+async def _converse_core(
+    message: str,
+    session_id: str = "default",
+    use_vision: bool = False,
+) -> dict:
+    state = _get_session_state(session_id)
+    controls_applied = _apply_semantic_controls(message, state)
+    result = await _think(message, use_vision=use_vision, session_state=state)
+    return _build_response_payload(
+        result,
+        session_id=session_id,
+        session_state=state,
+        controls_applied=controls_applied,
+    )
+
+
+@app.post("/chat")
+async def chat(message: str, use_vision: bool = False) -> dict:
+    result = await _think(message, use_vision=use_vision)
+    return _build_response_payload(result)
+
+
+@app.post("/converse")
+async def converse(message: str, session_id: str = "default", use_vision: bool = False) -> dict:
+    return await _converse_core(message, session_id=session_id, use_vision=use_vision)
 
 
 @app.post("/vision-chat")
 async def vision_chat(message: str) -> dict:
     result = await _think(message, use_vision=True)
-    return {
-        "response": _out(result["text"]),
-        "tools_executed": result["tools"],
-        "emotion": _sanitize_emotion(result["emotion"]),
-        "intent": result["intent"],
-        "model_used": result["model_used"],
-        "vision": result["vision"],
-    }
+    return _build_response_payload(result)
 
 
 @app.post("/voice-chat")
@@ -577,18 +667,55 @@ async def voice_chat(audio: UploadFile = File(...), use_vision: bool = False) ->
         return {"transcription": "", "response": "I could not understand you."}
 
     result = await _think(user_text, use_vision=use_vision)
-    response_text = _out(result["text"])
+    payload = _build_response_payload(result)
+    payload["transcription"] = _out(user_text)
+    payload["audio_url"] = _build_tts_url(payload["response"])
+    return payload
 
-    return {
-        "transcription": _out(user_text),
-        "response": response_text,
-        "tools_executed": result["tools"],
-        "emotion": _sanitize_emotion(result["emotion"]),
-        "intent": result["intent"],
-        "model_used": result["model_used"],
-        "vision": result["vision"],
-        "audio_url": f"{VOICE}/tts?text={response_text[:300]}",
-    }
+
+@app.post("/converse-audio")
+async def converse_audio(
+    audio: UploadFile = File(...),
+    session_id: str = "default",
+    use_vision: bool = False,
+) -> dict:
+    state = _get_session_state(session_id)
+    if not state.get("mic_enabled", True):
+        return {
+            "session_id": session_id,
+            "transcription": "",
+            "response": "Microphone input is disabled for this session.",
+            "session_state": state,
+            "controls_applied": {},
+            "audio_url": None,
+        }
+
+    async with httpx.AsyncClient(timeout=60) as client:
+        files = {"audio": (audio.filename, await audio.read(), audio.content_type)}
+        stt_res = await client.post(
+            f"{VOICE}/stt",
+            files=files,
+            params={"language": state.get("language", "es")},
+        )
+        user_text = stt_res.json().get("text", "")
+
+    if not user_text:
+        return {
+            "session_id": session_id,
+            "transcription": "",
+            "response": "I could not understand you.",
+            "session_state": state,
+            "controls_applied": {},
+            "audio_url": None,
+        }
+
+    payload = await _converse_core(
+        user_text,
+        session_id=session_id,
+        use_vision=use_vision,
+    )
+    payload["transcription"] = _out(user_text)
+    return payload
 
 
 @app.get("/status")
@@ -611,6 +738,7 @@ async def status() -> dict:
         "context_window": CONTEXT_WINDOW,
         "messages_until_summary": max(0, _SUMMARIZE_EVERY - _message_count),
         "vision_url": VISION,
+        "active_sessions": len(_SESSION_STATE),
     }
 
 

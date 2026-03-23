@@ -99,6 +99,13 @@ else
     fail "chat endpoint did not return expected JSON"
 fi
 
+CONVERSE_RESPONSE="$(curl -fsS -X POST --get --data-urlencode "message=hola" --data-urlencode "session_id=smoke" http://localhost:8403/converse 2>/dev/null || true)"
+if echo "$CONVERSE_RESPONSE" | grep -q '"session_state"'; then
+    ok "converse endpoint returned session payload"
+else
+    fail "converse endpoint did not return expected JSON"
+fi
+
 if docker exec jarvis_ollama ollama list >/dev/null 2>&1; then
     ok "ollama list works inside jarvis_ollama"
 else
