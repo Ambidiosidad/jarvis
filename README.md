@@ -26,6 +26,29 @@ JARVIS is designed to be different:
 - Query local knowledge sources
 - Use it as a base for home automation or robotics projects
 
+
+## Installation
+
+### Public repo
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Ambidiosidad/jarvis/main/scripts/jarvis/install.sh | sudo bash
+```
+
+The installer configures storage, Docker, services, models, and optional offline content.
+
+
+## Local Development (Desktop)
+
+```bash
+git clone https://github.com/Ambidiosidad/jarvis.git
+cd jarvis/extensions
+docker compose -f docker-compose.dev.yml up -d --build
+docker exec jarvis_ollama ollama pull gemma3:1b
+docker exec jarvis_ollama ollama pull qwen2.5:3b
+```
+
+
 ## Quick demo
 
 After installation, you can send a message to JARVIS with:
@@ -50,44 +73,6 @@ curl -X POST "http://localhost:8403/chat?message=Hello Jarvis"
 - **Extensible design** for automation and robotics
 - **Docker-based setup** for easier installation
 
----
-## What makes JARVIS different
-
-JARVIS is not just another chat interface around an LLM.
-
-It is designed as a local assistant system for Raspberry Pi, with a focus on:
-
-- voice interaction
-- memory persistence
-- on-device style deployment
-- modular architecture
-- extensibility for physical computing and robotics
-
-The goal is to provide a foundation for a private, hackable, real-world AI assistant rather than a simple demo project.
-
----
-
-## Installation
-
-### Public repo
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Ambidiosidad/jarvis/main/scripts/jarvis/install.sh | sudo bash
-```
-
-The installer configures storage, Docker, services, models, and optional offline content.
-
----
-
-## Local Development (Desktop)
-
-```bash
-git clone https://github.com/Ambidiosidad/jarvis.git
-cd jarvis/extensions
-docker compose -f docker-compose.dev.yml up -d --build
-docker exec jarvis_ollama ollama pull gemma3:1b
-docker exec jarvis_ollama ollama pull qwen2.5:3b
-```
 
 ---
 ## System Requirements
