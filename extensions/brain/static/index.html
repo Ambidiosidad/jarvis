@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
@@ -15,7 +15,6 @@
     display: flex;
     flex-direction: column;
   }
-  /* Header */
   .header {
     background: linear-gradient(135deg, #0d1b2a, #1b263b);
     padding: 6px 12px;
@@ -31,7 +30,8 @@
     letter-spacing: 2px;
   }
   .status-dot {
-    width: 8px; height: 8px;
+    width: 8px;
+    height: 8px;
     border-radius: 50%;
     background: #4caf50;
     animation: pulse 2s infinite;
@@ -47,8 +47,6 @@
     background: #1e3a5f;
     color: #81d4fa;
   }
-
-  /* Messages */
   .messages {
     flex: 1;
     overflow-y: auto;
@@ -103,8 +101,6 @@
     0%, 100% { opacity: 0.2; }
     50% { opacity: 1; }
   }
-
-  /* Input */
   .input-area {
     display: flex;
     padding: 6px;
@@ -127,14 +123,16 @@
     border-color: #4fc3f7;
   }
   .btn {
-    width: 36px; height: 36px;
-    border-radius: 50%;
+    min-width: 46px;
+    height: 36px;
+    border-radius: 18px;
     border: none;
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    font-size: 16px;
+    font-size: 12px;
+    padding: 0 10px;
   }
   .btn-send {
     background: #1565c0;
@@ -150,8 +148,6 @@
     color: white;
     animation: pulse 0.5s infinite;
   }
-
-  /* Scrollbar */
   .messages::-webkit-scrollbar { width: 3px; }
   .messages::-webkit-scrollbar-track { background: transparent; }
   .messages::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
@@ -168,18 +164,16 @@
 </div>
 
 <div class="messages" id="messages">
-  <div class="msg system">Sistema de memoria Supermemory activo</div>
+  <div class="msg system">Supermemory memory engine active</div>
 </div>
 
 <div class="input-area">
-  <button class="btn btn-mic" id="micBtn" onclick="toggleMic()">🎤</button>
-  <input type="text" id="input" placeholder="Escribe aquí..."
-         onkeydown="if(event.key==='Enter')sendMessage()">
-  <button class="btn btn-send" onclick="sendMessage()">→</button>
+  <button class="btn btn-mic" id="micBtn" onclick="toggleMic()">Mic</button>
+  <input type="text" id="input" placeholder="Type a message..." onkeydown="if(event.key==='Enter')sendMessage()">
+  <button class="btn btn-send" onclick="sendMessage()">Send</button>
 </div>
 
 <script>
-const API = '';  // Same origin
 const messagesEl = document.getElementById('messages');
 const inputEl = document.getElementById('input');
 const moodEl = document.getElementById('moodBadge');
@@ -207,7 +201,7 @@ function showTyping() {
   const div = document.createElement('div');
   div.className = 'typing';
   div.id = 'typing';
-  div.innerHTML = '<span>●</span><span>●</span><span>●</span>';
+  div.innerHTML = '<span>.</span><span>.</span><span>.</span>';
   messagesEl.appendChild(div);
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
@@ -226,27 +220,22 @@ async function sendMessage() {
   showTyping();
 
   try {
-    const r = await fetch(`/chat?message=${encodeURIComponent(text)}`, {
-      method: 'POST'
-    });
+    const r = await fetch(`/chat?message=${encodeURIComponent(text)}`, { method: 'POST' });
     const data = await r.json();
     hideTyping();
 
-    addMessage(data.response, 'jarvis',
-      `${data.model_used} · ${data.intent}`);
+    addMessage(data.response || 'No response', 'jarvis', `${data.model_used || 'model'} � ${data.intent || 'general'}`);
 
-    // Update mood
     if (data.emotion && data.emotion.mood) {
-      moodEl.textContent = `${data.emotion.mood} · ♥ ${(data.emotion.bond || 0).toFixed(1)}`;
+      moodEl.textContent = `${data.emotion.mood} � bond ${(data.emotion.bond || 0).toFixed(1)}`;
     }
 
-    // Play TTS if available
     if (data.response) {
       playTTS(data.response);
     }
-  } catch(e) {
+  } catch (e) {
     hideTyping();
-    addMessage('Error de conexión', 'system');
+    addMessage('Connection error', 'system');
     statusDot.style.background = '#f44336';
   }
 }
@@ -256,76 +245,75 @@ async function playTTS(text) {
     const audio = new Audio(`/voice-proxy/tts?text=${encodeURIComponent(text.substring(0, 300))}`);
     audio.volume = 0.8;
     audio.play().catch(() => {});
-  } catch(e) {}
+  } catch (e) {}
 }
 
 async function toggleMic() {
   if (isRecording) {
-    // Stop recording
     isRecording = false;
     micBtn.classList.remove('recording');
     if (mediaRecorder && mediaRecorder.state !== 'inactive') {
       mediaRecorder.stop();
     }
-  } else {
-    // Start recording
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({audio: true});
-      mediaRecorder = new MediaRecorder(stream);
-      const chunks = [];
+    return;
+  }
 
-      mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
-      mediaRecorder.onstop = async () => {
-        stream.getTracks().forEach(t => t.stop());
-        const blob = new Blob(chunks, {type: 'audio/webm'});
-        const form = new FormData();
-        form.append('audio', blob, 'recording.webm');
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRecorder = new MediaRecorder(stream);
+    const chunks = [];
 
-        showTyping();
-        try {
-          const r = await fetch('/voice-chat', {method: 'POST', body: form});
-          const data = await r.json();
-          hideTyping();
+    mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
+    mediaRecorder.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      const blob = new Blob(chunks, { type: 'audio/webm' });
+      const form = new FormData();
+      form.append('audio', blob, 'recording.webm');
 
-          if (data.transcription) {
-            addMessage(data.transcription, 'user', 'voz');
-          }
-          if (data.response) {
-            addMessage(data.response, 'jarvis',
-              `${data.model_used || ''} · ${data.intent || ''}`);
-            playTTS(data.response);
-          }
-          if (data.emotion && data.emotion.mood) {
-            moodEl.textContent = `${data.emotion.mood} · ♥ ${(data.emotion.bond || 0).toFixed(1)}`;
-          }
-        } catch(e) {
-          hideTyping();
-          addMessage('Error procesando audio', 'system');
+      showTyping();
+      try {
+        const r = await fetch('/voice-chat', { method: 'POST', body: form });
+        const data = await r.json();
+        hideTyping();
+
+        if (data.transcription) {
+          addMessage(data.transcription, 'user', 'voice');
         }
-      };
+        if (data.response) {
+          addMessage(data.response, 'jarvis', `${data.model_used || ''} � ${data.intent || ''}`);
+          playTTS(data.response);
+        }
+        if (data.emotion && data.emotion.mood) {
+          moodEl.textContent = `${data.emotion.mood} � bond ${(data.emotion.bond || 0).toFixed(1)}`;
+        }
+      } catch (e) {
+        hideTyping();
+        addMessage('Audio processing error', 'system');
+      }
+    };
 
-      mediaRecorder.start();
-      isRecording = true;
-      micBtn.classList.add('recording');
+    mediaRecorder.start();
+    isRecording = true;
+    micBtn.classList.add('recording');
 
-      // Auto-stop after 10 seconds
-      setTimeout(() => {
-        if (isRecording) toggleMic();
-      }, 10000);
-    } catch(e) {
-      addMessage('Micrófono no disponible', 'system');
-    }
+    setTimeout(() => {
+      if (isRecording) toggleMic();
+    }, 10000);
+  } catch (e) {
+    addMessage('Microphone unavailable', 'system');
   }
 }
 
-// Check connection on load
-fetch('/health').then(r => r.json()).then(data => {
-  statusDot.style.background = '#4caf50';
-  addMessage(`Jarvis v${data.version || '3.1'} · ${data.model || 'gemma3:1b'}`, 'system');
-}).catch(() => {
-  statusDot.style.background = '#f44336';
-  addMessage('No se puede conectar con Jarvis', 'system');
-});
+fetch('/health')
+  .then((r) => r.json())
+  .then((data) => {
+    statusDot.style.background = '#4caf50';
+    addMessage(`Jarvis v${data.version || '3.1'} � ${data.model || 'gemma3:1b'}`, 'system');
+  })
+  .catch(() => {
+    statusDot.style.background = '#f44336';
+    addMessage('Cannot connect to Jarvis', 'system');
+  });
 </script>
 </body>
 </html>

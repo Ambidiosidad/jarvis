@@ -98,33 +98,24 @@ try {
     Write-Host "[4/4] Entering continuous conversation mode..." -ForegroundColor Cyan
     Write-Host ""
     Write-Host "JARVIS conversation mode is live." -ForegroundColor Green
-    Write-Host "Session: $SessionId"
-    Write-Host "Vision flag: $visionFlag"
-    Write-Host "Type 'salir', 'exit', or 'quit' to stop."
+    Write-Host "Session tag: $SessionId"
+    Write-Host "Vision flag: $visionFlag (not used by /chat endpoint)"
+    Write-Host "Type 'exit' or 'quit' to stop."
     Write-Host ""
 
     while ($true) {
-        $u = Read-Host "Tu"
+        $u = Read-Host "You"
         if ([string]::IsNullOrWhiteSpace($u)) { continue }
-        if ($u -in @("salir", "exit", "quit")) { break }
+        if ($u -in @("exit", "quit", "salir")) { break }
 
         $msg = [System.Uri]::EscapeDataString($u)
-        $sid = [System.Uri]::EscapeDataString($SessionId)
-        $uri = "http://localhost:8403/converse?message=$msg&session_id=$sid&use_vision=$visionFlag"
+        $uri = "http://localhost:8403/chat?message=$msg"
 
         try {
             $r = Invoke-RestMethod -Method Post -Uri $uri -TimeoutSec 120
             Write-Host "Jarvis: $($r.response)"
-
-            if ($null -ne $r.controls_applied) {
-                $controls = ($r.controls_applied | ConvertTo-Json -Compress)
-                if ($controls -ne "{}") {
-                    Write-Host "  [controls] $controls" -ForegroundColor DarkGray
-                }
-            }
-
-            if ($null -ne $r.vision -and $null -ne $r.vision.summary) {
-                Write-Host "  [vision] $($r.vision.summary)" -ForegroundColor DarkGray
+            if ($null -ne $r.intent -or $null -ne $r.model_used) {
+                Write-Host "  [intent=$($r.intent) model=$($r.model_used)]" -ForegroundColor DarkGray
             }
         }
         catch {
