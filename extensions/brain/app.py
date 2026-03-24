@@ -191,19 +191,30 @@ async def _call_llm_chat(user_msg: str, system: str,
         })
     messages.append({"role": "user", "content": user_msg})
 
+    payload = {
+        "model": model or MODEL,
+        "messages": messages,
+        "stream": False,
+        "options": {
+            "temperature": 0.7,
+            "num_ctx": 4096,
+            "num_predict": max_tokens,
+        }
+    }
+
     async with httpx.AsyncClient(timeout=120) as c:
-        r = await c.post(f"{OLLAMA}/api/chat", json={
-            "model": model or MODEL,
-            "messages": messages,
-            "stream": False,
-            "options": {
-                "temperature": 0.7,
-                "num_ctx": 4096,
-                "num_predict": max_tokens,
-            }
-        })
-        r.raise_for_status()
-    return r.json().get("message", {}).get("content", "").strip()
+        try:
+            r = await c.post(f"{OLLAMA}/api/chat", json=payload)
+            r.raise_for_status()
+            return r.json().get("message", {}).get("content", "").strip()
+        except Exception:
+            selected = model or MODEL
+            if selected != MODEL:
+                payload["model"] = MODEL
+                r2 = await c.post(f"{OLLAMA}/api/chat", json=payload)
+                r2.raise_for_status()
+                return r2.json().get("message", {}).get("content", "").strip()
+            raise
 
 
 async def _call_llm_simple(prompt: str, system: str,
@@ -423,14 +434,27 @@ async def _think(user_msg: str) -> dict:
 
 @app.post("/chat")
 async def chat(message: str):
-    result = await _think(message)
-    return {
-        "response": result["text"],
-        "tools_executed": result["tools"],
-        "emotion": result["emotion"],
-        "intent": result["intent"],
-        "model_used": result["model_used"],
-    }
+    try:
+        result = await _think(message)
+        return {
+            "response": result["text"],
+            "tools_executed": result["tools"],
+            "emotion": result["emotion"],
+            "intent": result["intent"],
+            "model_used": result["model_used"],
+        }
+    except Exception as e:
+        return {
+            "response": (
+                "No he podido procesar el mensaje ahora mismo. "
+                "Revisa que Ollama y los modelos esten cargados."
+            ),
+            "tools_executed": [],
+            "emotion": {"mood": "neutral", "energy": 0.5, "patience": 0.8, "bond": 0.1, "reason": "error"},
+            "intent": "general",
+            "model_used": MODEL,
+            "error": str(e),
+        }
 
 
 @app.post("/voice-chat")
@@ -444,16 +468,31 @@ async def voice_chat(audio: UploadFile = File(...)):
     if not user_text:
         return {"transcription": "", "response": "No te he entendido."}
 
-    result = await _think(user_text)
-    return {
-        "transcription": _out(user_text),
-        "response": result["text"],
-        "tools_executed": result["tools"],
-        "emotion": result["emotion"],
-        "intent": result["intent"],
-        "model_used": result["model_used"],
-        "audio_url": f"{VOICE}/tts?text={result['text'][:300]}"
-    }
+    try:
+        result = await _think(user_text)
+        return {
+            "transcription": _out(user_text),
+            "response": result["text"],
+            "tools_executed": result["tools"],
+            "emotion": result["emotion"],
+            "intent": result["intent"],
+            "model_used": result["model_used"],
+            "audio_url": f"{VOICE}/tts?text={result['text'][:300]}"
+        }
+    except Exception as e:
+        return {
+            "transcription": _out(user_text),
+            "response": (
+                "No he podido procesar el audio ahora mismo. "
+                "Verifica Ollama y los modelos."
+            ),
+            "tools_executed": [],
+            "emotion": {"mood": "neutral", "energy": 0.5, "patience": 0.8, "bond": 0.1, "reason": "error"},
+            "intent": "general",
+            "model_used": MODEL,
+            "audio_url": None,
+            "error": str(e),
+        }
 
 
 @app.get("/status")
