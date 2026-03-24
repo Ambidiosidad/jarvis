@@ -1,3 +1,6 @@
+<img width="483" height="198" alt="image" src="https://github.com/user-attachments/assets/66bd9ec8-a496-46a8-b67e-63ee20d6fcc2" />
+
+
 # Project J.A.R.V.I.S.
 
 ## Offline AI Assistant (Voice + Memory + UI)
@@ -65,21 +68,7 @@ http://localhost:8403
 
 You can type directly in the UI and use the microphone button.
 
-## Run Terminal Console Directly
 
-### Linux/macOS
-
-```bash
-cd /opt/jarvis
-sudo bash scripts/jarvis/chat_loop.sh
-```
-
-### Windows (PowerShell)
-
-```powershell
-cd C:\Users\your-user\path\jarvis
-powershell -ExecutionPolicy Bypass -File .\scripts\jarvis\start_dev_converse.ps1 -NoBuild
-```
 
 ## Core Services
 
