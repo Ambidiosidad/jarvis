@@ -21,6 +21,9 @@ It includes local LLM inference, persistent memory, neural TTS, speech input, an
 - Built-in web chat UI served by `jarvis-brain` at `http://localhost:8403`
 - Optional wake-word module (`openWakeWord`) included in `voice/wake_word.py`
 
+<img width="938" height="567" alt="image" src="https://github.com/user-attachments/assets/7291d50e-dac9-4d14-a8f5-adc35f7771c1" />
+
+
 ## Installation (Raspberry Pi / Linux)
 
 ```bash
