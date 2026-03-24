@@ -14,11 +14,23 @@ services:
     environment:
       - OLLAMA_HOST=0.0.0.0
 
+  jarvis-qdrant:
+    image: qdrant/qdrant:v1.16
+    container_name: jarvis_qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
   jarvis-memory:
     build: ./memory
     container_name: jarvis-memory
     ports:
       - "8401:8401"
+    environment:
+      - OLLAMA_URL=http://jarvis_ollama:11434
+      - QDRANT_URL=http://jarvis_qdrant:6333
     volumes:
       - memory_data:/app/data
     healthcheck:
@@ -65,6 +77,7 @@ services:
       - MEMORY_URL=http://jarvis-memory:8401
       - VOICE_URL=http://jarvis-voice:8402
       - VISION_URL=http://jarvis-vision:8405
+      - QDRANT_URL=http://jarvis_qdrant:6333
       - MOTORS_URL=http://jarvis-motors:8404
       - MODEL_NAME=gemma3:1b
       - MODEL_REASONING=qwen2.5:3b
@@ -80,6 +93,7 @@ services:
 
 volumes:
   ollama_data:
+  qdrant_data:
   memory_data:
   voice_data:
   vision_data:

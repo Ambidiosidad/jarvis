@@ -17,6 +17,7 @@ from tools import tools_prompt
 from emotion_analyzer import analyze_conversation_sentiment
 from intent_classifier import classify_intent
 from fact_extractor import extract_facts
+from inferencer import extract_facts_with_llm
 
 app = FastAPI(title="Jarvis Brain v3.1")
 app.add_middleware(
@@ -284,6 +285,18 @@ async def _auto_extract_facts(user_msg: str):
             await _save_fact(f["fact"], "static", f["category"])
         else:
             await _save_dynamic_context(f["fact"], f["category"])
+
+    # LLM-powered extraction for complex messages
+    if len(user_msg) > 50:
+        try:
+            llm_facts = await extract_facts_with_llm(user_msg)
+            for f in llm_facts:
+                if f["type"] == "static":
+                    await _save_fact(f["fact"], "static", f["category"])
+                else:
+                    await _save_dynamic_context(f["fact"], f["category"])
+        except Exception:
+            pass
 
 
 # ═══════════════════════════════════════

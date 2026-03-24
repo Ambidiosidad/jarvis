@@ -18,6 +18,7 @@ from typing import Optional
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import semantic_search
 
 app = FastAPI(title="Jarvis Memory v3 — Supermemory Offline")
 app.add_middleware(
@@ -161,6 +162,9 @@ async def init_db():
                 (time.time(), "curious", 0.6, 0.8, 0.1,
                  "Jarvis acaba de despertar"))
             await db.commit()
+
+    # Initialize Qdrant collection for semantic search
+    await semantic_search.init_collection()
 
 
 # ═══════════════════════════════════════
@@ -333,6 +337,13 @@ async def add_memory(mem: MemoryInput):
 
         await db.commit()
 
+    # Index in Qdrant for semantic search
+    await semantic_search.index_memory(new_id, mem.content, {
+        "category": category,
+        "memory_type": mem.memory_type,
+        "source": mem.source,
+    })
+
     action = "updated" if superseded_id else "created"
     return {"ok": True, "action": action, "id": new_id,
             "superseded": superseded_id, "category": category}
@@ -341,18 +352,24 @@ async def add_memory(mem: MemoryInput):
 @app.get("/memories/search")
 async def search_memories(q: str, limit: int = 10):
     """
-    Search memories by text similarity.
-    Uses SQLite LIKE for now.
-    When Qdrant is available, this will use semantic search.
+    Search memories by semantic similarity (Qdrant) with SQLite fallback.
+    Like Supermemory's hybrid search.
     """
+    # Try semantic search first
+    if semantic_search.is_ready():
+        results = await semantic_search.search_similar(q, limit)
+        if results:
+            return {"results": results, "search_type": "semantic"}
+
+    # Fallback to SQLite text search
     now = time.time()
     async with aiosqlite.connect(str(DB)) as db:
-        # Clean expired memories
         await db.execute(
             "DELETE FROM memories WHERE expires_at IS NOT NULL "
             "AND expires_at < ?", (now,))
-
         words = q.lower().split()
+        if not words:
+            return {"results": [], "search_type": "none"}
         conditions = " AND ".join(
             [f"LOWER(content) LIKE '%' || ? || '%'" for _ in words])
         query = (
@@ -364,10 +381,10 @@ async def search_memories(q: str, limit: int = 10):
         await db.commit()
 
     return {"results": [
-        {"id": r[0], "content": r[1], "type": r[2],
-         "category": r[3], "confidence": r[4]}
+        {"memory_id": r[0], "content": r[1], "memory_type": r[2],
+         "category": r[3], "confidence": r[4], "score": r[4]}
         for r in rows
-    ]}
+    ], "search_type": "text"}
 
 
 @app.get("/memories/all")
@@ -728,10 +745,21 @@ async def stats():
         "summaries": s,
         "emotional_updates": e,
         "patterns": p,
+        "semantic_search": semantic_search.is_ready(),
     }
+
+
+@app.get("/memories/semantic")
+async def semantic_search_endpoint(q: str, limit: int = 5):
+    """Direct semantic search endpoint."""
+    if not semantic_search.is_ready():
+        return {"error": "Semantic search not available. Is Qdrant running?"}
+    results = await semantic_search.search_similar(q, limit)
+    return {"results": results, "count": len(results)}
 
 
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "jarvis-memory",
-            "version": "3.0", "engine": "supermemory-offline"}
+            "version": "3.1", "engine": "supermemory-offline",
+            "semantic_search": semantic_search.is_ready()}
