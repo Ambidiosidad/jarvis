@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>J.A.R.V.I.S.</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: -apple-system, 'Segoe UI', sans-serif;
+    background: #0a0a0a;
+    color: #e0e0e0;
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  /* Header */
+  .header {
+    background: linear-gradient(135deg, #0d1b2a, #1b263b);
+    padding: 6px 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #1e3a5f;
+    flex-shrink: 0;
+  }
+  .header h1 {
+    font-size: 14px;
+    color: #4fc3f7;
+    letter-spacing: 2px;
+  }
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #4caf50;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+  .mood-badge {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 8px;
+    background: #1e3a5f;
+    color: #81d4fa;
+  }
+
+  /* Messages */
+  .messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .msg {
+    max-width: 85%;
+    padding: 8px 10px;
+    border-radius: 12px;
+    font-size: 13px;
+    line-height: 1.3;
+    word-wrap: break-word;
+  }
+  .msg.user {
+    align-self: flex-end;
+    background: #1565c0;
+    color: white;
+    border-bottom-right-radius: 4px;
+  }
+  .msg.jarvis {
+    align-self: flex-start;
+    background: #1e1e1e;
+    border: 1px solid #333;
+    border-bottom-left-radius: 4px;
+  }
+  .msg.system {
+    align-self: center;
+    font-size: 10px;
+    color: #666;
+    font-style: italic;
+  }
+  .msg .meta {
+    font-size: 9px;
+    color: #888;
+    margin-top: 3px;
+  }
+  .typing {
+    align-self: flex-start;
+    padding: 8px 12px;
+    font-size: 12px;
+    color: #4fc3f7;
+  }
+  .typing span {
+    animation: blink 1.4s infinite;
+  }
+  .typing span:nth-child(2) { animation-delay: 0.2s; }
+  .typing span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes blink {
+    0%, 100% { opacity: 0.2; }
+    50% { opacity: 1; }
+  }
+
+  /* Input */
+  .input-area {
+    display: flex;
+    padding: 6px;
+    gap: 6px;
+    background: #111;
+    border-top: 1px solid #333;
+    flex-shrink: 0;
+  }
+  .input-area input {
+    flex: 1;
+    padding: 8px 10px;
+    border-radius: 20px;
+    border: 1px solid #333;
+    background: #1a1a1a;
+    color: white;
+    font-size: 13px;
+    outline: none;
+  }
+  .input-area input:focus {
+    border-color: #4fc3f7;
+  }
+  .btn {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 16px;
+  }
+  .btn-send {
+    background: #1565c0;
+    color: white;
+  }
+  .btn-send:active { background: #0d47a1; }
+  .btn-mic {
+    background: #333;
+    color: #4fc3f7;
+  }
+  .btn-mic.recording {
+    background: #c62828;
+    color: white;
+    animation: pulse 0.5s infinite;
+  }
+
+  /* Scrollbar */
+  .messages::-webkit-scrollbar { width: 3px; }
+  .messages::-webkit-scrollbar-track { background: transparent; }
+  .messages::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div style="display:flex;align-items:center;gap:8px;">
+    <div class="status-dot" id="statusDot"></div>
+    <h1>J.A.R.V.I.S.</h1>
+  </div>
+  <span class="mood-badge" id="moodBadge">neutral</span>
+</div>
+
+<div class="messages" id="messages">
+  <div class="msg system">Sistema de memoria Supermemory activo</div>
+</div>
+
+<div class="input-area">
+  <button class="btn btn-mic" id="micBtn" onclick="toggleMic()">🎤</button>
+  <input type="text" id="input" placeholder="Escribe aquí..."
+         onkeydown="if(event.key==='Enter')sendMessage()">
+  <button class="btn btn-send" onclick="sendMessage()">→</button>
+</div>
+
+<script>
+const API = '';  // Same origin
+const messagesEl = document.getElementById('messages');
+const inputEl = document.getElementById('input');
+const moodEl = document.getElementById('moodBadge');
+const statusDot = document.getElementById('statusDot');
+const micBtn = document.getElementById('micBtn');
+
+let isRecording = false;
+let mediaRecorder = null;
+
+function addMessage(text, type, meta) {
+  const div = document.createElement('div');
+  div.className = `msg ${type}`;
+  div.textContent = text;
+  if (meta) {
+    const metaDiv = document.createElement('div');
+    metaDiv.className = 'meta';
+    metaDiv.textContent = meta;
+    div.appendChild(metaDiv);
+  }
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function showTyping() {
+  const div = document.createElement('div');
+  div.className = 'typing';
+  div.id = 'typing';
+  div.innerHTML = '<span>●</span><span>●</span><span>●</span>';
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function hideTyping() {
+  const el = document.getElementById('typing');
+  if (el) el.remove();
+}
+
+async function sendMessage() {
+  const text = inputEl.value.trim();
+  if (!text) return;
+
+  addMessage(text, 'user');
+  inputEl.value = '';
+  showTyping();
+
+  try {
+    const r = await fetch(`/chat?message=${encodeURIComponent(text)}`, {
+      method: 'POST'
+    });
+    const data = await r.json();
+    hideTyping();
+
+    addMessage(data.response, 'jarvis',
+      `${data.model_used} · ${data.intent}`);
+
+    // Update mood
+    if (data.emotion && data.emotion.mood) {
+      moodEl.textContent = `${data.emotion.mood} · ♥ ${(data.emotion.bond || 0).toFixed(1)}`;
+    }
+
+    // Play TTS if available
+    if (data.response) {
+      playTTS(data.response);
+    }
+  } catch(e) {
+    hideTyping();
+    addMessage('Error de conexión', 'system');
+    statusDot.style.background = '#f44336';
+  }
+}
+
+async function playTTS(text) {
+  try {
+    const audio = new Audio(`/voice-proxy/tts?text=${encodeURIComponent(text.substring(0, 300))}`);
+    audio.volume = 0.8;
+    audio.play().catch(() => {});
+  } catch(e) {}
+}
+
+async function toggleMic() {
+  if (isRecording) {
+    // Stop recording
+    isRecording = false;
+    micBtn.classList.remove('recording');
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      mediaRecorder.stop();
+    }
+  } else {
+    // Start recording
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({audio: true});
+      mediaRecorder = new MediaRecorder(stream);
+      const chunks = [];
+
+      mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(chunks, {type: 'audio/webm'});
+        const form = new FormData();
+        form.append('audio', blob, 'recording.webm');
+
+        showTyping();
+        try {
+          const r = await fetch('/voice-chat', {method: 'POST', body: form});
+          const data = await r.json();
+          hideTyping();
+
+          if (data.transcription) {
+            addMessage(data.transcription, 'user', 'voz');
+          }
+          if (data.response) {
+            addMessage(data.response, 'jarvis',
+              `${data.model_used || ''} · ${data.intent || ''}`);
+            playTTS(data.response);
+          }
+          if (data.emotion && data.emotion.mood) {
+            moodEl.textContent = `${data.emotion.mood} · ♥ ${(data.emotion.bond || 0).toFixed(1)}`;
+          }
+        } catch(e) {
+          hideTyping();
+          addMessage('Error procesando audio', 'system');
+        }
+      };
+
+      mediaRecorder.start();
+      isRecording = true;
+      micBtn.classList.add('recording');
+
+      // Auto-stop after 10 seconds
+      setTimeout(() => {
+        if (isRecording) toggleMic();
+      }, 10000);
+    } catch(e) {
+      addMessage('Micrófono no disponible', 'system');
+    }
+  }
+}
+
+// Check connection on load
+fetch('/health').then(r => r.json()).then(data => {
+  statusDot.style.background = '#4caf50';
+  addMessage(`Jarvis v${data.version || '3.1'} · ${data.model || 'gemma3:1b'}`, 'system');
+}).catch(() => {
+  statusDot.style.background = '#f44336';
+  addMessage('No se puede conectar con Jarvis', 'system');
+});
+</script>
+</body>
+</html>

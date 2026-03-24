@@ -7,10 +7,11 @@ Integración con Memory v3 (Supermemory offline):
 - Contexto temporal que caduca (72h)
 - Modelo dual + clasificador de intención + multi-turno
 """
-import os, json, re, asyncio, unicodedata
+import os, json, re, asyncio, unicodedata, io
 from typing import Optional
 import httpx
 from fastapi import FastAPI, UploadFile, File
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from personality import build_system_prompt
 from tools import tools_prompt
@@ -20,6 +21,7 @@ from fact_extractor import extract_facts
 from inferencer import extract_facts_with_llm
 
 app = FastAPI(title="Jarvis Brain v3.1")
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
@@ -471,6 +473,21 @@ async def status():
         "context_window": CONTEXT_WINDOW,
         "messages_until_summary": max(0, _SUMMARIZE_EVERY - _message_count)
     }
+
+
+@app.get("/")
+async def serve_ui():
+    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+
+
+@app.get("/voice-proxy/tts")
+async def proxy_tts(text: str):
+    try:
+        async with httpx.AsyncClient(timeout=30) as c:
+            r = await c.get(f"{VOICE}/tts", params={"text": text[:300]})
+            return StreamingResponse(io.BytesIO(r.content), media_type="audio/wav")
+    except Exception:
+        return {"error": "TTS not available"}
 
 
 @app.get("/health")
